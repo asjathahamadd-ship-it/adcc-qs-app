@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">ADCC QS Register</string>
+    <string name="title_activity_main">ADCC QS Register</string>
+    <string name="package_name">com.aladeeb.qsregister</string>
+    <string name="custom_url_scheme">com.aladeeb.qsregister</string>
+</resources>

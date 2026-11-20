@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#283b5b">
+<title>ADCC QS Register</title>
+<link rel="icon" href="logo.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Montserrat:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+ <nav class="tabs" aria-label="Main">
+  <div class="brand" id="railBrand"></div>
+  <button data-act="nav" data-v="home" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
+  <button data-act="nav" data-v="register"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M7 3h8l4 4v14H7z"/><path d="M15 3v4h4M10 12h6M10 16h6"/></svg>Register</button>
+  <button class="add" data-act="add"><span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg></span>Add</button>
+  <button data-act="nav" data-v="projects"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M5 21V8l7-4 7 4v13M9 21v-6h6v6"/></svg>Projects</button>
+  <button class="gear" data-act="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>Settings</button>
+ </nav>
+ <div class="content">
+  <header class="appbar"><div id="barBrand"></div><button class="gearb" data-act="settings" aria-label="Settings"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg></button></header>
+  <main id="main"></main>
+ </div>
+</div>
+<div class="sheet" id="sheet" hidden><div class="panel" id="panel" role="dialog" aria-modal="true"></div></div>
+<div class="toast" id="toast" role="status"></div>
+<div class="gate" id="gate" hidden><div><h2>ADCC QS Register</h2><p id="gateMsg">Loading…</p></div></div>
+<div class="login" id="login" hidden>
+ <form class="box" id="loginForm" novalidate>
+  <div class="tile"><img src="logo.png" alt="Al Adeeb Building Contracting LLC"></div>
+  <h1>QS Register</h1>
+  <p id="loginSub">Log in with your username and password</p>
+  <label>Username<input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
+  <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+  <label id="confirmWrap" hidden>Confirm password<input name="confirm" type="password" autocomplete="new-password"></label>
+  <div class="err" id="loginErr" role="alert"></div>
+  <button class="btn pri" type="submit" id="loginBtn">Log in</button>
+  <button class="swap" type="button" id="swapBtn">New user? Create an account</button>
+ </form>
+</div>
+<script src="supabase.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
