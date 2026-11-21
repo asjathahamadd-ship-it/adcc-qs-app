@@ -14,7 +14,11 @@ const STATUSES=['Draft','Submitted','Under review','Revise & resubmit','Approved
 const WITH=['Me','Site team','Project manager','Consultant / Engineer','Client','Subcontractor','Finance / Accounts','Other'];
 const ST={Draft:'grey',Submitted:'blue','Under review':'amber','Revise & resubmit':'red',Approved:'green',Certified:'green',Invoiced:'violet',Paid:'green',Closed:'grey',Rejected:'red'};
 
-let user=null,loaded=false,docs=[],projects=[],settings={},logoUrl='';
+let user=null,loaded=false,docs=[],projects=[],settings={},logoUrl='',dprs=[],dprMissing=false;
+const F2={proj:''};let dprPhotosNew=[],dprPhotosKept=[],dprPhotosRemoved=[],editingDpr=null;
+const WEATHER=['Sunny','Hot','Humid','Windy','Dusty / sandstorm','Cloudy','Rain'];
+const TRADES=['Foreman','Mason','Steel fixer','Carpenter','Labour / helper','Electrician','Plumber','Painter','Plasterer','Tile fixer','Welder','Scaffolder','Operator','Driver','Supervisor','Engineer','Safety officer'];
+const UNITS=['m²','m³','m','nos','kg','ton','LS','%'];
 const F={q:'',cat:'All',proj:'',status:'',withp:'',sort:'updated'};
 let view='home',pendingFiles=[],keptFiles=[],removedFiles=[],editingId=null,busy=false,signup=false;
 
@@ -52,6 +56,8 @@ async function load(){
   const e=p.error||d.error||s.error;if(e)throw e;
   projects=p.data.map(r=>({id:r.id,name:r.name,code:r.code||'',client:r.client||'',value:r.value??''}));
   docs=d.data.map(fromDoc);
+  const r=await sb.from('dprs').select('*').order('report_date',{ascending:false});
+  if(r.error){dprs=[];dprMissing=true}else{dprMissing=false;dprs=r.data.map(x=>({id:x.id,project:x.project_id||'',date:x.report_date,weather:x.weather||'',work:x.work||[],manpower:x.manpower||[],equipment:x.equipment||'',remarks:x.remarks||'',photos:x.photos||[],updated:x.updated_at}))}
   const prevLogo=settings.logo_path;settings=s.data||{};
   if(settings.logo_path&&settings.logo_path!==prevLogo){const {data}=await sb.storage.from(BUCKET).createSignedUrl(settings.logo_path,60*60*24*7);logoUrl=data?.signedUrl||''}
   if(!settings.logo_path)logoUrl='';
@@ -77,7 +83,7 @@ function render(){
   $('#railBrand').innerHTML=brandHTML();$('#barBrand').innerHTML=brandHTML();
   document.querySelectorAll('.tabs [data-v]').forEach(b=>{if(b.dataset.v===view)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});
   const m=$('#main');
-  m.innerHTML=view==='register'?registerView():view==='projects'?projectsView():homeView();
+  m.innerHTML=view==='register'?registerView():view==='projects'?projectsView():view==='dpr'?dprView():homeView();
 }
 function homeView(){
   const d=new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'});
@@ -92,7 +98,7 @@ function homeView(){
   const max=Math.max(1,...byWith.map(x=>x.n));
   const attn=[...late,...soon.filter(x=>!late.includes(x))].slice(0,6);
   const recent=[...docs].sort((a,b)=>(b.updated||'').localeCompare(a.updated||'')).slice(0,5);
-  return`${hi}<h1>Where everything is now</h1>
+  return`${hi}<h1>Where everything is now</h1>${dprTodayCard()}
   <div class="kpis">
    <button class="kpi" data-act="go" data-f="open"><b>${open.length}</b><small>Open documents</small></button>
    <button class="kpi ${late.length?'alert':''}" data-act="go" data-f="late"><b>${late.length}</b><small>Overdue · ${soon.length} due this week</small></button>
@@ -313,6 +319,101 @@ function settingsForm(){
   };
 }
 
+/* ---------- DPR (daily progress report) ---------- */
+const menCount=r=>r.manpower.reduce((s,m)=>s+(Number(m.count)||0),0);
+function dprTodayCard(){
+  if(dprMissing)return'';
+  const t=dprs.filter(r=>r.date===today());
+  return`<button class="card dprtoday" data-act="${t.length?'dpr-open':'dpr-new'}" data-id="${t.length?esc(t[0].id):''}"><span><b>Today's DPR</b><span class="mute small">${t.length?`Done · ${t.length>1?t.length+' reports · ':''}${t.reduce((s,r)=>s+menCount(r),0)} manpower · ${t.reduce((s,r)=>s+r.work.length,0)} activities`:'Not filled yet. Tap to add.'}</span></span><span class="stamp ${t.length?'c-green':'c-amber'}">${t.length?'Filled':'Pending'}</span></button>`;
+}
+function dprView(){
+  if(dprMissing)return`<div class="top"><h1>Daily progress</h1></div><div class="empty"><h2>One-time setup needed</h2><p>The DPR table hasn't been created in Supabase yet. Run the DPR setup script in the Supabase SQL Editor, then tap Refresh.</p><button class="btn pri" data-act="refresh">↻ Refresh</button></div>`;
+  const list=dprs.filter(r=>!F2.proj||r.project===F2.proj);
+  return`<div class="top"><h1>Daily progress</h1><button class="btn pri sm" data-act="dpr-new">+ New DPR</button></div>
+  <div class="filters" style="grid-template-columns:minmax(0,1fr)"><select id="fDprProj" aria-label="Project">${opts(projects.map(p=>({v:p.id,l:p.name})),F2.proj,'All projects')}</select></div>
+  <div class="list">${list.map(r=>{const p=projName(r.project);return`<button class="row" data-act="dpr-open" data-id="${esc(r.id)}">
+    <span class="head"><span class="stamp c-blue">${esc(fmtDate(r.date))}</span>${p?`<span class="cat">${esc(p)}</span>`:''}</span>
+    <span class="t">${r.work.length?esc(r.work.slice(0,2).map(w=>w.activity).filter(Boolean).join(', '))+(r.work.length>2?` +${r.work.length-2} more`:''):'No activities recorded'}</span><span class="amt">${menCount(r)} men</span>
+    <span class="m"><span>${r.work.length} activities</span>${r.photos.length?`<span>${r.photos.length} photos</span>`:''}${r.weather?`<span>${esc(r.weather)}</span>`:''}${r.remarks?'<span class="late">Has remarks</span>':''}</span></button>`}).join('')||`<div class="empty"><p>No daily reports yet. Add today's DPR: work done, manpower, photos and remarks.</p><button class="btn pri" data-act="dpr-new">+ New DPR</button></div>`}</div>`;
+}
+async function photoUrls(ph){
+  if(!ph.length)return{};const {data}=await sb.storage.from(BUCKET).createSignedUrls(ph.map(f=>f.path),3600);
+  const m={};(data||[]).forEach(d=>{if(d.signedUrl)m[d.path]=d.signedUrl});return m;
+}
+async function dprDetail(id){
+  const r=dprs.find(x=>x.id===id);if(!r)return closeSheet();
+  openSheet(`<div class="ph"><div><div class="cat">Daily progress report${projName(r.project)?' · '+esc(projName(r.project)):''}</div><h2>${esc(fmtDate(r.date))}</h2></div><button class="x" data-act="close" aria-label="Close">×</button></div>
+  ${r.weather?`<p class="mute" style="margin:0 0 6px">Weather: <b>${esc(r.weather)}</b></p>`:''}
+  <h3 class="sec">Work done (${r.work.length})</h3>
+  ${r.work.length?`<table class="dt"><thead><tr><th>Activity</th><th>Location</th><th class="num">Qty</th></tr></thead><tbody>${r.work.map(w=>`<tr><td>${esc(w.activity)}</td><td>${esc(w.location)}</td><td class="num">${w.qty!==''&&w.qty!=null?esc(w.qty)+' '+esc(w.unit||''):''}</td></tr>`).join('')}</tbody></table>`:'<p class="mute small">None recorded.</p>'}
+  <h3 class="sec">Manpower (${menCount(r)})</h3>
+  ${r.manpower.length?`<table class="dt"><tbody>${r.manpower.map(m=>`<tr><td>${esc(m.trade)}</td><td class="num">${esc(m.count)}</td></tr>`).join('')}<tr><td><b>Total</b></td><td class="num"><b>${menCount(r)}</b></td></tr></tbody></table>`:'<p class="mute small">None recorded.</p>'}
+  ${r.equipment?`<h3 class="sec">Equipment</h3><p style="white-space:pre-wrap;margin:0">${esc(r.equipment)}</p>`:''}
+  <h3 class="sec">Remarks / delays / issues</h3><p style="white-space:pre-wrap;margin:0" class="${r.remarks?'':'mute small'}">${r.remarks?esc(r.remarks):'None.'}</p>
+  <h3 class="sec">Photos (${r.photos.length})</h3><div class="pgrid" id="pgrid">${r.photos.map(()=>'<div class="ph-ph"></div>').join('')||'<p class="mute small">No photos.</p>'}</div>
+  <div class="btns" style="margin-top:22px"><button class="btn" data-act="dpr-edit" data-id="${esc(r.id)}">Edit</button><button class="btn danger" data-act="dpr-del" data-id="${esc(r.id)}">Delete</button></div><div id="delBox"></div>`);
+  const urls=await photoUrls(r.photos),g=$('#pgrid');
+  if(g&&r.photos.length)g.innerHTML=r.photos.map(f=>urls[f.path]?`<button class="pthumb" data-act="url" data-u="${esc(urls[f.path])}"><img src="${esc(urls[f.path])}" alt="${esc(f.name)}" loading="lazy"></button>`:`<div class="ph-ph">${esc(f.name)}</div>`).join('');
+}
+const workRow=w=>`<div class="wrow" data-row="work"><input data-k="activity" placeholder="Activity, e.g. Blockwork 200mm" value="${esc(w.activity||'')}"><input data-k="location" placeholder="Location / area" value="${esc(w.location||'')}"><input data-k="qty" type="number" inputmode="decimal" step="any" placeholder="Qty" value="${esc(w.qty??'')}"><input data-k="unit" list="unitList" placeholder="Unit" value="${esc(w.unit||'')}"><button type="button" class="x sm" data-act="dpr-rmrow" aria-label="Remove">×</button></div>`;
+const manRow=m=>`<div class="mrow" data-row="man"><input data-k="trade" list="tradeList" placeholder="Trade, e.g. Mason" value="${esc(m.trade||'')}"><input data-k="count" type="number" inputmode="numeric" min="0" placeholder="No." value="${esc(m.count??'')}"><button type="button" class="x sm" data-act="dpr-rmrow" aria-label="Remove">×</button></div>`;
+function dprForm(id){
+  const r=id?dprs.find(x=>x.id===id):null;editingDpr=id||null;
+  dprPhotosNew=[];dprPhotosKept=[...(r?.photos||[])];dprPhotosRemoved=[];
+  const work=r?.work?.length?r.work:[{}],man=r?.manpower?.length?r.manpower:[{}];
+  openSheet(`<div class="ph"><h2>${r?'Edit DPR':'New daily progress report'}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+  <form class="form" id="dprForm" novalidate>
+   <datalist id="tradeList">${TRADES.map(t=>`<option value="${esc(t)}">`).join('')}</datalist><datalist id="unitList">${UNITS.map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
+   <label>Date<input name="date" type="date" value="${esc(r?.date||today())}" required></label>
+   <label>Project<select name="project">${opts(projects.map(p=>({v:p.id,l:p.name})),r?.project||F2.proj||(projects.length===1?projects[0].id:''),'No project')}</select></label>
+   <label class="full">Weather<select name="weather">${opts(WEATHER,r?.weather||'','—')}</select></label>
+   <div class="full"><b class="small">Work done today</b><div id="workRows" class="rows">${work.map(workRow).join('')}</div><button type="button" class="btn sm" data-act="dpr-addwork">+ Add activity</button></div>
+   <div class="full"><b class="small">Manpower</b><div id="manRows" class="rows">${man.map(manRow).join('')}</div>
+    <div class="btns"><button type="button" class="btn sm" data-act="dpr-addman">+ Add trade</button>${!r&&dprs.length?'<button type="button" class="btn sm" data-act="dpr-copyman">Copy from last DPR</button>':''}<span class="mute small" id="menTotal" style="align-self:center"></span></div></div>
+   <label class="full">Equipment on site<textarea name="equipment" placeholder="e.g. 1 JCB, 1 mobile crane 25T, 2 concrete mixers" style="min-height:60px">${esc(r?.equipment||'')}</textarea></label>
+   <label class="full">Remarks / delays / issues<textarea name="remarks" placeholder="e.g. Waiting for consultant inspection on slab, material delay for blocks">${esc(r?.remarks||'')}</textarea></label>
+   <div class="full"><b class="small">Site photos</b><ul class="files" id="photoList" style="margin:6px 0"></ul>
+    <label class="btn sm" style="width:max-content">Add photos<input id="photoIn" type="file" accept="image/*" multiple hidden></label></div>
+   <p id="formMsg" class="full small late" role="alert"></p>
+   <div class="full btns"><button class="btn pri" type="submit" id="saveBtn">${r?'Save changes':'Save DPR'}</button><button class="btn" type="button" data-act="close">Cancel</button></div>
+  </form>`);
+  drawPhotos();menTotal();
+  $('#photoIn').onchange=e=>{for(const f of e.target.files){if(f.size>20*1048576){toast(f.name+' is over 20 MB');continue}dprPhotosNew.push(f)}e.target.value='';drawPhotos()};
+  $('#dprForm').oninput=e=>{if(e.target.dataset.k==='count')menTotal()};
+  $('#dprForm').onsubmit=saveDpr;
+}
+function menTotal(){const t=[...document.querySelectorAll('#manRows [data-k=count]')].reduce((s,i)=>s+(Number(i.value)||0),0);const el=$('#menTotal');if(el)el.textContent=`Total: ${t} men`}
+function drawPhotos(){
+  const l=$('#photoList');if(!l)return;
+  l.innerHTML=dprPhotosKept.map((f,i)=>`<li><span>${esc(f.name)}</span><button type="button" class="link" data-act="dpr-rmkept" data-i="${i}">Remove</button></li>`).join('')+
+   dprPhotosNew.map((f,i)=>`<li><span>${esc(f.name)} <span class="mute">(new)</span></span><button type="button" class="link" data-act="dpr-rmnew" data-i="${i}">Remove</button></li>`).join('');
+}
+const readRows=(sel,keys)=>[...document.querySelectorAll(sel)].map(row=>{const o={};keys.forEach(k=>{const v=row.querySelector(`[data-k=${k}]`).value.trim();o[k]=(k==='qty'||k==='count')?(v===''?'':Number(v)):v});return o});
+async function saveDpr(e){
+  e.preventDefault();if(busy)return;
+  const fd=new FormData(e.target),g=k=>(fd.get(k)||'').toString().trim(),msg=$('#formMsg');
+  if(!g('date')){msg.textContent='Please pick a date.';return}
+  const work=readRows('#workRows .wrow',['activity','location','qty','unit']).filter(w=>w.activity||w.location||w.qty!=='');
+  const manpower=readRows('#manRows .mrow',['trade','count']).filter(m=>m.trade||m.count!=='');
+  if(!work.length&&!manpower.length&&!g('remarks')&&!dprPhotosNew.length&&!dprPhotosKept.length){msg.textContent='Add at least one activity, trade, remark or photo.';return}
+  const btn=$('#saveBtn');busy=true;btn.disabled=true;msg.textContent='';
+  const photos=[...dprPhotosKept],uploaded=[];
+  try{
+    for(let i=0;i<dprPhotosNew.length;i++){const f=dprPhotosNew[i];btn.textContent=`Uploading photo ${i+1} of ${dprPhotosNew.length}…`;
+      try{const path=await upload(f);uploaded.push(path);photos.push({path,name:f.name,size:f.size})}catch(err){err.upload=f.name;throw err}}
+    btn.textContent='Saving…';
+    const row={project_id:g('project')||null,report_date:g('date'),weather:g('weather'),work,manpower,equipment:g('equipment'),remarks:g('remarks'),photos,updated_at:new Date().toISOString()};
+    const {error}=editingDpr?await sb.from('dprs').update(row).eq('id',editingDpr):await sb.from('dprs').insert(row);
+    if(error)throw error;
+    await removeFiles(dprPhotosRemoved.map(f=>f.path));
+    busy=false;closeSheet();toast('DPR saved');refresh(true);
+  }catch(err){
+    busy=false;btn.disabled=false;btn.textContent=editingDpr?'Save changes':'Save DPR';
+    if(!err.upload)await removeFiles(uploaded);
+    msg.textContent=err.upload?`Couldn't upload ${err.upload}: ${err.message||'please try again'}`:errMsg(err);
+  }
+}
+
 /* ---------- login ---------- */
 function showLogin(){
   $('#login').hidden=false;$('#gate').hidden=true;
@@ -375,6 +476,17 @@ document.addEventListener('click',async e=>{
   else if(a==='with'){Object.assign(F,{q:'',cat:'All',proj:'',status:'_open',withp:t.dataset.w});go('register')}
   else if(a==='go'){Object.assign(F,{q:'',cat:'All',proj:'',withp:'',status:{open:'_open',late:'_late',pend:'_pend',paid:'Paid'}[t.dataset.f]});go('register')}
   else if(a==='proj-open'){Object.assign(F,{q:'',cat:'All',status:'',withp:'',proj:id});go('register')}
+  else if(a==='dpr-new'){if(loaded&&!dprMissing)dprForm(null);else if(dprMissing)go('dpr')}
+  else if(a==='dpr-open')dprDetail(id);
+  else if(a==='dpr-edit')dprForm(id);
+  else if(a==='dpr-addwork'){$('#workRows').insertAdjacentHTML('beforeend',workRow({}));$('#workRows .wrow:last-child input').focus()}
+  else if(a==='dpr-addman'){$('#manRows').insertAdjacentHTML('beforeend',manRow({}));$('#manRows .mrow:last-child input').focus()}
+  else if(a==='dpr-rmrow'){t.parentElement.remove();menTotal()}
+  else if(a==='dpr-copyman'){const last=[...dprs].sort((x,y)=>(y.date||'').localeCompare(x.date||''))[0];if(last?.manpower?.length){$('#manRows').innerHTML=last.manpower.map(manRow).join('');menTotal();toast('Copied manpower from '+fmtDate(last.date))}}
+  else if(a==='dpr-rmkept'){dprPhotosRemoved.push(...dprPhotosKept.splice(+t.dataset.i,1));drawPhotos()}
+  else if(a==='dpr-rmnew'){dprPhotosNew.splice(+t.dataset.i,1);drawPhotos()}
+  else if(a==='dpr-del'){$('#delBox').innerHTML=`<div class="card" style="margin-top:12px"><p style="margin:0 0 10px">Delete this daily report and its photos? This can't be undone.</p><div class="btns"><button class="btn danger" data-act="dpr-delyes" data-id="${esc(id)}">Yes, delete</button><button class="btn" data-act="delno">Keep it</button></div></div>`}
+  else if(a==='dpr-delyes'){const r=dprs.find(x=>x.id===id);const {error}=await sb.from('dprs').delete().eq('id',id);if(error)return toast(errMsg(error));await removeFiles((r?.photos||[]).map(f=>f.path));closeSheet();toast('Deleted');refresh(true)}
   else if(a==='proj-add')projForm(null);
   else if(a==='proj-edit')projForm(id);
   else if(a==='proj-del'){const {error}=await sb.from('projects').delete().eq('id',id);if(error)return toast(errMsg(error));closeSheet();toast('Project deleted');refresh(true)}
@@ -390,7 +502,7 @@ document.addEventListener('click',async e=>{
 $('#sheet').addEventListener('click',e=>{if(e.target.id==='sheet')closeSheet()});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#sheet').hidden)closeSheet()});
 document.addEventListener('input',e=>{if(e.target.id==='q'){F.q=e.target.value;const pos=e.target.selectionStart;render();const q=$('#q');q.focus();q.setSelectionRange(pos,pos)}});
-document.addEventListener('change',e=>{const m={fProj:'proj',fStatus:'status',fWith:'withp',fSort:'sort'}[e.target.id];if(m){F[m]=e.target.value;render()}});
+document.addEventListener('change',e=>{if(e.target.id==='fDprProj'){F2.proj=e.target.value;render();return}const m={fProj:'proj',fStatus:'status',fWith:'withp',fSort:'sort'}[e.target.id];if(m){F[m]=e.target.value;render()}});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&user&&loaded&&$('#sheet').hidden)refresh(true)});
 
 /* Android back button */
