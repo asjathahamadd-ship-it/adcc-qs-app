@@ -15,7 +15,7 @@ const WITH=['Me','Site team','Project manager','Consultant / Engineer','Client',
 const ST={Draft:'grey',Submitted:'blue','Under review':'amber','Revise & resubmit':'red',Approved:'green',Certified:'green',Invoiced:'violet',Paid:'green',Closed:'grey',Rejected:'red'};
 
 let user=null,loaded=false,docs=[],projects=[],settings={},logoUrl='',dprs=[],dprMissing=false;
-const F2={proj:''};let dprPhotosNew=[],dprPhotosKept=[],dprPhotosRemoved=[],editingDpr=null;
+const F2={proj:''};let pphotos=[],ppMissing=false,ppProj='',ppNew=[],ppKept=[],ppRemoved=[],editingPP=null,lbList=[],lbIdx=0;const urlCache={};let dprPhotosNew=[],dprPhotosKept=[],dprPhotosRemoved=[],editingDpr=null;
 const WEATHER=['Sunny','Hot','Humid','Windy','Dusty / sandstorm','Cloudy','Rain'];
 const TRADES=['Foreman','Mason','Steel fixer','Carpenter','Labour / helper','Electrician','Plumber','Painter','Plasterer','Tile fixer','Welder','Scaffolder','Operator','Driver','Supervisor','Engineer','Safety officer'];
 const UNITS=['m²','m³','m','nos','kg','ton','LS','%'];
@@ -56,6 +56,8 @@ async function load(){
   const e=p.error||d.error||s.error;if(e)throw e;
   projects=p.data.map(r=>({id:r.id,name:r.name,code:r.code||'',client:r.client||'',value:r.value??''}));
   docs=d.data.map(fromDoc);
+  const pp=await sb.from('progress_photos').select('*').order('taken_on',{ascending:false});
+  if(pp.error){pphotos=[];ppMissing=true}else{ppMissing=false;pphotos=pp.data.map(x=>({id:x.id,project:x.project_id||'',stage:x.stage||'Other',location:x.location||'',date:x.taken_on,note:x.note||'',photos:x.photos||[]}))}
   const r=await sb.from('dprs').select('*').order('report_date',{ascending:false});
   if(r.error){dprs=[];dprMissing=true}else{dprMissing=false;dprs=r.data.map(x=>({id:x.id,project:x.project_id||'',date:x.report_date,weather:x.weather||'',work:x.work||[],manpower:x.manpower||[],equipment:x.equipment||'',remarks:x.remarks||'',photos:x.photos||[],updated:x.updated_at}))}
   const prevLogo=settings.logo_path;settings=s.data||{};
@@ -83,7 +85,8 @@ function render(){
   $('#railBrand').innerHTML=brandHTML();$('#barBrand').innerHTML=brandHTML();
   document.querySelectorAll('.tabs [data-v]').forEach(b=>{if(b.dataset.v===view)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current')});
   const m=$('#main');
-  m.innerHTML=view==='register'?registerView():view==='projects'?projectsView():view==='dpr'?dprView():homeView();
+  m.innerHTML=view==='register'?registerView():view==='projects'?projectsView():view==='dpr'?dprView():view==='photos'?photosView():homeView();
+  if(view==='photos')fillThumbs();
 }
 function homeView(){
   const d=new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'});
@@ -352,8 +355,7 @@ async function dprDetail(id){
   <h3 class="sec">Remarks / delays / issues</h3><p style="white-space:pre-wrap;margin:0" class="${r.remarks?'':'mute small'}">${r.remarks?esc(r.remarks):'None.'}</p>
   <h3 class="sec">Photos (${r.photos.length})</h3><div class="pgrid" id="pgrid">${r.photos.map(()=>'<div class="ph-ph"></div>').join('')||'<p class="mute small">No photos.</p>'}</div>
   <div class="btns" style="margin-top:22px"><button class="btn" data-act="dpr-edit" data-id="${esc(r.id)}">Edit</button><button class="btn danger" data-act="dpr-del" data-id="${esc(r.id)}">Delete</button></div><div id="delBox"></div>`);
-  const urls=await photoUrls(r.photos),g=$('#pgrid');
-  if(g&&r.photos.length)g.innerHTML=r.photos.map(f=>urls[f.path]?`<button class="pthumb" data-act="url" data-u="${esc(urls[f.path])}"><img src="${esc(urls[f.path])}" alt="${esc(f.name)}" loading="lazy"></button>`:`<div class="ph-ph">${esc(f.name)}</div>`).join('');
+  const g=$('#pgrid');if(g&&r.photos.length){g.innerHTML=r.photos.map((f,j)=>thumb(f,'dpr:'+r.id,j)).join('');fillThumbs(g)}
 }
 const workRow=w=>`<div class="wrow" data-row="work"><input data-k="activity" placeholder="Activity, e.g. Blockwork 200mm" value="${esc(w.activity||'')}"><input data-k="location" placeholder="Location / area" value="${esc(w.location||'')}"><input data-k="qty" type="number" inputmode="decimal" step="any" placeholder="Qty" value="${esc(w.qty??'')}"><input data-k="unit" list="unitList" placeholder="Unit" value="${esc(w.unit||'')}"><button type="button" class="x sm" data-act="dpr-rmrow" aria-label="Remove">×</button></div>`;
 const manRow=m=>`<div class="mrow" data-row="man"><input data-k="trade" list="tradeList" placeholder="Trade, e.g. Mason" value="${esc(m.trade||'')}"><input data-k="count" type="number" inputmode="numeric" min="0" placeholder="No." value="${esc(m.count??'')}"><button type="button" class="x sm" data-act="dpr-rmrow" aria-label="Remove">×</button></div>`;
@@ -412,6 +414,120 @@ async function saveDpr(e){
     if(!err.upload)await removeFiles(uploaded);
     msg.textContent=err.upload?`Couldn't upload ${err.upload}: ${err.message||'please try again'}`:errMsg(err);
   }
+}
+
+/* ---------- Progress photos ---------- */
+const STAGES=['Site clearance & setting out','Excavation','Anti-termite treatment','Polythene sheet','PCC / blinding','Waterproofing (foundation)','Reinforcement','Shuttering / formwork','Concreting (RCC)','De-shuttering & curing','Backfilling & compaction','Blockwork','MEP first fix','Plastering','Screed & waterproofing (roof / wet areas)','Tiling & flooring','False ceiling','Painting','Doors, windows & joinery','MEP second fix & fixtures','Final finish / handover'];
+async function signed(paths){
+  const now=Date.now(),need=[...new Set(paths)].filter(p=>p&&!(urlCache[p]&&urlCache[p].exp>now));
+  for(let i=0;i<need.length;i+=100){const {data}=await sb.storage.from(BUCKET).createSignedUrls(need.slice(i,i+100),3600);(data||[]).forEach(d=>{if(d.signedUrl)urlCache[d.path]={url:d.signedUrl,exp:now+50*60e3}})}
+  const m={};paths.forEach(p=>{if(urlCache[p])m[p]=urlCache[p].url});return m;
+}
+async function fillThumbs(root){
+  const els=[...(root||document).querySelectorAll('img[data-path]:not([src])')];if(!els.length)return;
+  const m=await signed(els.map(e=>e.dataset.path));els.forEach(e=>{const u=m[e.dataset.path];if(u)e.src=u});
+}
+const thumb=(f,list,i)=>`<button type="button" class="pthumb" data-act="lb" data-list="${esc(list)}" data-i="${i}"><img data-path="${esc(f.path)}" alt="${esc(f.name)}" loading="lazy"></button>`;
+function stageList(){const extra=[...new Set(pphotos.map(x=>x.stage))].filter(s=>!STAGES.includes(s));return[...STAGES,...extra]}
+function photosView(){
+  if(ppMissing)return`<div class="top"><h1>Progress photos</h1></div><div class="empty"><h2>One-time setup needed</h2><p>The progress photos table hasn't been created in Supabase yet. Run the setup script in the Supabase SQL Editor, then tap Refresh.</p><button class="btn pri" data-act="refresh">↻ Refresh</button></div>`;
+  if(!ppProj&&projects.length===1)ppProj=projects[0].id;
+  const list=pphotos.filter(x=>!ppProj||x.project===ppProj),total=list.reduce((s,x)=>s+x.photos.length,0);
+  const rows=stageList().map((st,i)=>{
+    const es=list.filter(x=>x.stage===st),ph=es.flatMap(x=>x.photos),last=es[0]?.date;
+    return`<li class="stg ${es.length?'done':''}"><span class="dot">${i+1}</span><div class="sbody">
+     <div class="shead"><button class="stitle" data-act="pp-stage" data-s="${esc(st)}">${esc(st)}</button>
+      ${es.length?`<span class="mute small">${ph.length} photo${ph.length===1?'':'s'} · ${fmtDate(last)}</span>`:''}
+      <button class="btn sm" data-act="pp-new" data-s="${esc(st)}">+ Photos</button></div>
+     ${ph.length?`<div class="strip">${ph.slice(0,6).map((f,j)=>thumb(f,'stage:'+st,j)).join('')}${ph.length>6?`<button class="more" data-act="pp-stage" data-s="${esc(st)}">+${ph.length-6}</button>`:''}</div>`:''}
+    </div></li>`}).join('');
+  return`<div class="top"><h1>Progress photos</h1><button class="btn pri sm" data-act="pp-new" data-s="">+ Add photos</button></div>
+  <div class="filters" style="grid-template-columns:minmax(0,1fr)"><select id="fPPProj" aria-label="Project">${opts(projects.map(p=>({v:p.id,l:p.name})),ppProj,'All projects')}</select></div>
+  <p class="mute small" style="margin:0 0 12px">${total} photos · ${new Set(list.map(x=>x.stage)).size} of ${stageList().length} stages recorded</p>
+  <ol class="stages">${rows}</ol><button class="btn sm" data-act="pp-new" data-s="Other" style="margin-top:10px">+ Other stage</button>`;
+}
+function stagePhotos(st){return pphotos.filter(x=>x.stage===st&&(!ppProj||x.project===ppProj))}
+function stageSheet(st){
+  const es=stagePhotos(st);
+  openSheet(`<div class="ph"><div><div class="cat">Progress photos${ppProj?' · '+esc(projName(ppProj)):''}</div><h2>${esc(st)}</h2></div><button class="x" data-act="close" aria-label="Close">×</button></div>
+  <button class="btn pri" data-act="pp-new" data-s="${esc(st)}" style="margin-bottom:14px">+ Add photos to this stage</button>
+  ${es.length?es.map(x=>`<section class="ppentry"><div class="shead"><div><b>${esc(fmtDate(x.date))}</b>${x.location?` · ${esc(x.location)}`:''}${!ppProj&&projName(x.project)?`<div class="mute small">${esc(projName(x.project))}</div>`:''}</div><button class="link" data-act="pp-edit" data-id="${esc(x.id)}">Edit</button></div>
+   ${x.note?`<p style="margin:4px 0 8px;white-space:pre-wrap">${esc(x.note)}</p>`:''}<div class="pgrid">${x.photos.map((f,j)=>thumb(f,'entry:'+x.id,j)).join('')}</div></section>`).join(''):'<p class="mute">No photos for this stage yet.</p>'}`);
+  fillThumbs($('#panel'));
+}
+async function compress(file){
+  if(!/^image\/(jpeg|png|webp)$/.test(file.type)||file.size<400*1024)return file;
+  try{const bmp=await createImageBitmap(file);const sc=Math.min(1,1920/Math.max(bmp.width,bmp.height));
+    const c=document.createElement('canvas');c.width=Math.round(bmp.width*sc);c.height=Math.round(bmp.height*sc);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
+    const b=await new Promise(r=>c.toBlob(r,'image/jpeg',0.82));if(!b||b.size>=file.size)return file;
+    return new File([b],file.name.replace(/\.\w+$/,'')+'.jpg',{type:'image/jpeg'});}catch{return file}
+}
+function ppForm(id,stage){
+  const x=id?pphotos.find(e=>e.id===id):null;editingPP=id||null;ppNew=[];ppKept=[...(x?.photos||[])];ppRemoved=[];
+  const st=x?.stage||stage||'',isOther=st&&!stageList().includes(st)||st==='Other';
+  openSheet(`<div class="ph"><h2>${x?'Edit photos':'Add progress photos'}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+  <form class="form" id="ppForm" novalidate>
+   <label>Project<select name="project">${opts(projects.map(p=>({v:p.id,l:p.name})),x?.project||ppProj||(projects.length===1?projects[0].id:''),'No project')}</select></label>
+   <label>Date<input name="date" type="date" value="${esc(x?.date||today())}"></label>
+   <label class="full">Stage<select name="stage" id="ppStage">${opts([...stageList(),'Other'],isOther?'Other':st,'Choose stage')}</select></label>
+   <label class="full" id="otherWrap" ${isOther?'':'hidden'}>Stage name<input name="other" value="${esc(isOther&&st!=='Other'?st:'')}" placeholder="e.g. Swimming pool tiling"></label>
+   <label class="full">Location / element<input name="location" value="${esc(x?.location||'')}" placeholder="e.g. Footing F1–F6, Grid A–C, Ground floor slab"></label>
+   <label class="full">Note<textarea name="note" style="min-height:60px" placeholder="Optional, e.g. Inspected by consultant, WIR-045">${esc(x?.note||'')}</textarea></label>
+   <div class="full"><b class="small">Photos</b><div class="pgrid" id="ppGrid" style="margin:8px 0"></div>
+    <div class="btns"><label class="btn sm">📷 Take photo<input id="ppCam" type="file" accept="image/*" capture="environment" hidden></label><label class="btn sm">Choose from gallery<input id="ppIn" type="file" accept="image/*" multiple hidden></label></div></div>
+   <p id="formMsg" class="full small late" role="alert"></p>
+   <div class="full btns"><button class="btn pri" type="submit" id="saveBtn">${x?'Save changes':'Save photos'}</button><button class="btn" type="button" data-act="close">Cancel</button>${x?`<button class="btn danger" type="button" data-act="pp-del" data-id="${esc(x.id)}">Delete</button>`:''}</div>
+   <div id="delBox" class="full"></div>
+  </form>`);
+  drawPP();
+  const add=e=>{for(const f of e.target.files){if(f.size>25*1048576){toast(f.name+' is too large');continue}ppNew.push(f)}e.target.value='';drawPP()};
+  $('#ppIn').onchange=add;$('#ppCam').onchange=add;
+  $('#ppStage').onchange=e=>{$('#otherWrap').hidden=e.target.value!=='Other'};
+  $('#ppForm').onsubmit=savePP;
+}
+function drawPP(){
+  const g=$('#ppGrid');if(!g)return;
+  g.innerHTML=ppKept.map((f,i)=>`<div class="pthumb rel"><img data-path="${esc(f.path)}" alt=""><button type="button" class="rm" data-act="pp-rmkept" data-i="${i}" aria-label="Remove">×</button></div>`).join('')+
+   ppNew.map((f,i)=>`<div class="pthumb rel"><img src="${URL.createObjectURL(f)}" alt=""><button type="button" class="rm" data-act="pp-rmnew" data-i="${i}" aria-label="Remove">×</button></div>`).join('')||'<p class="mute small" style="grid-column:1/-1;margin:0">No photos yet.</p>';
+  fillThumbs(g);
+}
+async function savePP(e){
+  e.preventDefault();if(busy)return;
+  const fd=new FormData(e.target),g=k=>(fd.get(k)||'').toString().trim(),msg=$('#formMsg');
+  let stage=g('stage');if(stage==='Other')stage=g('other')||'Other';
+  if(!stage){msg.textContent='Please choose a stage.';return}
+  if(!ppNew.length&&!ppKept.length){msg.textContent='Add at least one photo.';return}
+  const btn=$('#saveBtn');busy=true;btn.disabled=true;msg.textContent='';
+  const photos=[...ppKept],uploaded=[];
+  try{
+    for(let i=0;i<ppNew.length;i++){btn.textContent=`Uploading ${i+1} of ${ppNew.length}…`;
+      const f=await compress(ppNew[i]);
+      try{const path=await upload(f);uploaded.push(path);photos.push({path,name:f.name,size:f.size})}catch(err){err.upload=ppNew[i].name;throw err}}
+    btn.textContent='Saving…';
+    const row={project_id:g('project')||null,stage,location:g('location'),taken_on:g('date')||today(),note:g('note'),photos,updated_at:new Date().toISOString()};
+    const {error}=editingPP?await sb.from('progress_photos').update(row).eq('id',editingPP):await sb.from('progress_photos').insert(row);
+    if(error)throw error;
+    await removeFiles(ppRemoved.map(f=>f.path));
+    busy=false;closeSheet();toast('Photos saved');if(row.project_id)ppProj=row.project_id;refresh(true);
+  }catch(err){
+    busy=false;btn.disabled=false;btn.textContent=editingPP?'Save changes':'Save photos';
+    if(!err.upload)await removeFiles(uploaded);
+    msg.textContent=err.upload?`Couldn't upload ${err.upload}: ${err.message||'please try again'}`:errMsg(err);
+  }
+}
+/* lightbox */
+function lbOpen(list,i){
+  if(list.startsWith('stage:'))lbList=stagePhotos(list.slice(6)).flatMap(x=>x.photos.map(f=>({...f,cap:`${fmtDate(x.date)}${x.location?' · '+x.location:''}`})));
+  else if(list.startsWith('entry:')){const x=pphotos.find(e=>e.id===list.slice(6));lbList=(x?.photos||[]).map(f=>({...f,cap:`${fmtDate(x.date)}${x.location?' · '+x.location:''}`}))}
+  else if(list.startsWith('dpr:')){const r=dprs.find(e=>e.id===list.slice(4));lbList=(r?.photos||[]).map(f=>({...f,cap:fmtDate(r.date)}))}
+  lbIdx=+i||0;let lb=$('#lb');
+  if(!lb){document.body.insertAdjacentHTML('beforeend','<div class="lb" id="lb"><button class="x lbx" data-act="lb-close" aria-label="Close">×</button><button class="lbn prev" data-act="lb-prev" aria-label="Previous">‹</button><img id="lbImg" alt=""><button class="lbn next" data-act="lb-next" aria-label="Next">›</button><div class="lbcap" id="lbCap"></div></div>');lb=$('#lb')}
+  lb.hidden=false;lbShow();
+}
+async function lbShow(){
+  const f=lbList[lbIdx];if(!f)return;const img=$('#lbImg');img.removeAttribute('src');
+  $('#lbCap').textContent=`${f.cap||''}   ${lbIdx+1} / ${lbList.length}`;
+  const m=await signed([f.path]);if(m[f.path])img.src=m[f.path];
 }
 
 /* ---------- login ---------- */
@@ -476,6 +592,17 @@ document.addEventListener('click',async e=>{
   else if(a==='with'){Object.assign(F,{q:'',cat:'All',proj:'',status:'_open',withp:t.dataset.w});go('register')}
   else if(a==='go'){Object.assign(F,{q:'',cat:'All',proj:'',withp:'',status:{open:'_open',late:'_late',pend:'_pend',paid:'Paid'}[t.dataset.f]});go('register')}
   else if(a==='proj-open'){Object.assign(F,{q:'',cat:'All',status:'',withp:'',proj:id});go('register')}
+  else if(a==='pp-new'){if(loaded&&!ppMissing)ppForm(null,t.dataset.s);else if(ppMissing)go('photos')}
+  else if(a==='pp-stage')stageSheet(t.dataset.s);
+  else if(a==='pp-edit')ppForm(id);
+  else if(a==='pp-rmkept'){ppRemoved.push(...ppKept.splice(+t.dataset.i,1));drawPP()}
+  else if(a==='pp-rmnew'){ppNew.splice(+t.dataset.i,1);drawPP()}
+  else if(a==='pp-del'){$('#delBox').innerHTML=`<div class="card" style="margin-top:12px"><p style="margin:0 0 10px">Delete these photos? This can't be undone.</p><div class="btns"><button type="button" class="btn danger" data-act="pp-delyes" data-id="${esc(id)}">Yes, delete</button><button type="button" class="btn" data-act="delno">Keep them</button></div></div>`}
+  else if(a==='pp-delyes'){const x=pphotos.find(e=>e.id===id);const {error}=await sb.from('progress_photos').delete().eq('id',id);if(error)return toast(errMsg(error));await removeFiles((x?.photos||[]).map(f=>f.path));closeSheet();toast('Deleted');refresh(true)}
+  else if(a==='lb')lbOpen(t.dataset.list,t.dataset.i);
+  else if(a==='lb-close')$('#lb').hidden=true;
+  else if(a==='lb-prev'){lbIdx=(lbIdx-1+lbList.length)%lbList.length;lbShow()}
+  else if(a==='lb-next'){lbIdx=(lbIdx+1)%lbList.length;lbShow()}
   else if(a==='dpr-new'){if(loaded&&!dprMissing)dprForm(null);else if(dprMissing)go('dpr')}
   else if(a==='dpr-open')dprDetail(id);
   else if(a==='dpr-edit')dprForm(id);
@@ -500,15 +627,16 @@ document.addEventListener('click',async e=>{
   }
 });
 $('#sheet').addEventListener('click',e=>{if(e.target.id==='sheet')closeSheet()});
-document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#sheet').hidden)closeSheet()});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){if($('#lb')&&!$('#lb').hidden)$('#lb').hidden=true;else if(!$('#sheet').hidden)closeSheet()}});
 document.addEventListener('input',e=>{if(e.target.id==='q'){F.q=e.target.value;const pos=e.target.selectionStart;render();const q=$('#q');q.focus();q.setSelectionRange(pos,pos)}});
-document.addEventListener('change',e=>{if(e.target.id==='fDprProj'){F2.proj=e.target.value;render();return}const m={fProj:'proj',fStatus:'status',fWith:'withp',fSort:'sort'}[e.target.id];if(m){F[m]=e.target.value;render()}});
+document.addEventListener('change',e=>{if(e.target.id==='fDprProj'){F2.proj=e.target.value;render();return}if(e.target.id==='fPPProj'){ppProj=e.target.value;render();return}const m={fProj:'proj',fStatus:'status',fWith:'withp',fSort:'sort'}[e.target.id];if(m){F[m]=e.target.value;render()}});
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&user&&loaded&&$('#sheet').hidden)refresh(true)});
 
 /* Android back button */
 const CapApp=window.Capacitor?.Plugins?.App;
 if(CapApp)CapApp.addListener('backButton',()=>{
-  if(!$('#sheet').hidden)closeSheet();
+  if($('#lb')&&!$('#lb').hidden)$('#lb').hidden=true;
+  else if(!$('#sheet').hidden)closeSheet();
   else if(view!=='home')go('home');
   else CapApp.exitApp();
 });
