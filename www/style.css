@@ -191,3 +191,21 @@ dl.facts dt{color:var(--mute);font-size:14px}dl.facts dd{margin:0;overflow-wrap:
 .lbn{position:absolute;top:50%;transform:translateY(-50%);width:48px;height:64px;border:0;border-radius:12px;background:rgb(255 255 255/.12);color:#fff;font-size:34px}
 .lbn.prev{left:8px}.lbn.next{right:8px}
 .lbcap{position:absolute;bottom:max(16px,env(safe-area-inset-bottom));left:0;right:0;text-align:center;color:#dfe5f0;font-size:14px;white-space:pre}
+
+.aifab{position:fixed;right:16px;bottom:calc(92px + max(env(safe-area-inset-bottom),var(--safe-area-inset-bottom,0px)));z-index:30;display:flex;align-items:center;gap:6px;height:52px;padding:0 18px;border-radius:26px;border:0;background:var(--navy);color:#fff;font-weight:700;font-size:16px;box-shadow:0 6px 20px rgb(0 0 0/.25);border:2px solid var(--gold)}
+@media(min-width:900px){.aifab{bottom:28px;right:28px}}
+.chat{display:grid;gap:10px;padding-bottom:12px;min-height:40vh}
+.msg{max-width:92%;padding:10px 14px;border-radius:16px;font-size:15px;white-space:pre-wrap;overflow-wrap:anywhere}
+.msg.me{justify-self:end;background:var(--navy);color:#fff;border-bottom-right-radius:4px}
+.msg.ai{justify-self:start;background:var(--soft);border-bottom-left-radius:4px;display:grid;gap:10px}
+.msg.typing{color:var(--mute);font-style:italic}
+.aihello p{margin:0 0 10px}.sugg{display:flex;flex-wrap:wrap;gap:8px}.sugg .chip{white-space:normal;text-align:left;min-height:40px;padding:8px 14px}
+.chatin{position:sticky;bottom:0;background:var(--bg);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;padding:10px 0 4px;border-top:1px solid var(--line)}
+.chatin textarea{min-height:50px;max-height:160px}
+.acard{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:12px;padding:12px;display:grid;gap:6px;white-space:normal}
+.acard .ah{font-weight:700}
+pre.mail{white-space:pre-wrap;font:14px/1.5 Inter,system-ui,sans-serif;background:var(--soft);border-radius:8px;padding:10px;margin:4px 0;max-height:320px;overflow:auto}
+.sortlist{display:grid;gap:10px;margin-top:12px}
+.sortrow{display:grid;grid-template-columns:88px minmax(0,1fr) 40px;gap:10px;align-items:start;background:var(--soft);border-radius:12px;padding:8px}
+.sortrow img{width:88px;height:88px;object-fit:cover;border-radius:8px}
+.sortf{display:grid;gap:6px}.sortf select,.sortf input{min-height:40px;padding:6px 10px}

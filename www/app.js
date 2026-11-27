@@ -203,11 +203,11 @@ function detail(id){
     toast('Updated');closeSheet();refresh(true);
   };
 }
-function docForm(id){
-  const x=id?docs.find(d=>d.id===id):null;editingId=id||null;
+function docForm(id,pre){
+  const x=id?docs.find(d=>d.id===id):(pre||null);editingId=id||null;
   pendingFiles=[];keptFiles=[...(x?.files||[])];removedFiles=[];
   const v=k=>esc(x?.[k]??'');
-  openSheet(`<div class="ph"><h2>${x?'Edit document':'Add document'}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+  openSheet(`<div class="ph"><h2>${id?'Edit document':(pre?'Add document (prepared by AI)':'Add document')}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
   <form class="form" id="docForm" novalidate>
    <label>Type<select name="category">${opts(CATS,x?.category||(F.cat!=='All'&&F.cat)||'Payment / IPA')}</select></label>
    <label>Project<select name="project">${opts(projects.map(p=>({v:p.id,l:p.name})),x?.project||F.proj||'','No project')}</select></label>
@@ -224,7 +224,7 @@ function docForm(id){
    <div class="full"><b class="small">Files (PDF, photos, Excel, Word — up to 20 MB each)</b><ul class="files" id="fileList" style="margin:6px 0"></ul>
     <label class="btn sm" style="width:max-content">Attach files<input id="fileIn" type="file" multiple hidden></label></div>
    <p id="formMsg" class="full small late" role="alert"></p>
-   <div class="full btns"><button class="btn pri" type="submit" id="saveBtn">${x?'Save changes':'Add to register'}</button><button class="btn" type="button" data-act="close">Cancel</button></div>
+   <div class="full btns"><button class="btn pri" type="submit" id="saveBtn">${id?'Save changes':'Add to register'}</button><button class="btn" type="button" data-act="close">Cancel</button></div>
   </form>`);
   drawFiles();
   $('#fileIn').onchange=e=>{for(const f of e.target.files){if(f.size>20*1048576){toast(f.name+' is over 20 MB');continue}pendingFiles.push(f)}e.target.value='';drawFiles()};
@@ -296,6 +296,9 @@ function settingsForm(){
      <label class="btn sm">${settings.logo_path?'Change logo':'Upload a sharper logo'}<input id="logoIn" type="file" accept="image/*" hidden></label>
      ${settings.logo_path?'<button type="button" class="btn sm danger" data-act="logo-rm">Use default</button>':''}
     </div></div>
+   <label>Your full name (for emails)<input name="full_name" value="${esc(settings.full_name||'')}" placeholder="e.g. Asjath Ahamed"></label>
+   <label>Job title<input name="job_title" value="${esc(settings.job_title||'Quantity Surveyor')}"></label>
+   <label class="full">Phone (for email signature)<input name="phone" type="tel" value="${esc(settings.phone||'')}" placeholder="+971 …"></label>
    <label class="full">Company name<input name="company" value="${esc(settings.company||'Al Adeeb Building Contracting LLC')}"></label>
    <label class="full">New password (leave empty to keep)<input name="pw" type="password" autocomplete="new-password"></label>
    <p id="formMsg" class="full small late" role="alert"></p>
@@ -314,7 +317,8 @@ function settingsForm(){
     const msg=$('#formMsg');
     if(pw&&pw.length<6){msg.textContent='Password must be at least 6 characters.';return}
     busy=true;
-    const {error}=await sb.from('settings').upsert({user_id:user.id,company:c,logo_path:settings.logo_path||null});
+    let {error}=await sb.from('settings').upsert({user_id:user.id,company:c,logo_path:settings.logo_path||null,full_name:fd.get('full_name').toString().trim(),job_title:fd.get('job_title').toString().trim(),phone:fd.get('phone').toString().trim()});
+    if(error&&/column/i.test(error.message||'')){msg.textContent='Run the AI setup script in Supabase to save name and phone.';busy=false;return}
     let pe=null;if(!error&&pw)({error:pe}=await sb.auth.updateUser({password:pw}));
     busy=false;
     if(error||pe){msg.textContent=errMsg(error||pe);return}
@@ -359,11 +363,11 @@ async function dprDetail(id){
 }
 const workRow=w=>`<div class="wrow" data-row="work"><input data-k="activity" placeholder="Activity, e.g. Blockwork 200mm" value="${esc(w.activity||'')}"><input data-k="location" placeholder="Location / area" value="${esc(w.location||'')}"><input data-k="qty" type="number" inputmode="decimal" step="any" placeholder="Qty" value="${esc(w.qty??'')}"><input data-k="unit" list="unitList" placeholder="Unit" value="${esc(w.unit||'')}"><button type="button" class="x sm" data-act="dpr-rmrow" aria-label="Remove">×</button></div>`;
 const manRow=m=>`<div class="mrow" data-row="man"><input data-k="trade" list="tradeList" placeholder="Trade, e.g. Mason" value="${esc(m.trade||'')}"><input data-k="count" type="number" inputmode="numeric" min="0" placeholder="No." value="${esc(m.count??'')}"><button type="button" class="x sm" data-act="dpr-rmrow" aria-label="Remove">×</button></div>`;
-function dprForm(id){
-  const r=id?dprs.find(x=>x.id===id):null;editingDpr=id||null;
+function dprForm(id,pre){
+  const r=id?dprs.find(x=>x.id===id):(pre||null);editingDpr=id||null;
   dprPhotosNew=[];dprPhotosKept=[...(r?.photos||[])];dprPhotosRemoved=[];
   const work=r?.work?.length?r.work:[{}],man=r?.manpower?.length?r.manpower:[{}];
-  openSheet(`<div class="ph"><h2>${r?'Edit DPR':'New daily progress report'}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+  openSheet(`<div class="ph"><h2>${id?'Edit DPR':(pre?'New DPR (prepared by AI)':'New daily progress report')}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
   <form class="form" id="dprForm" novalidate>
    <datalist id="tradeList">${TRADES.map(t=>`<option value="${esc(t)}">`).join('')}</datalist><datalist id="unitList">${UNITS.map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
    <label>Date<input name="date" type="date" value="${esc(r?.date||today())}" required></label>
@@ -371,13 +375,13 @@ function dprForm(id){
    <label class="full">Weather<select name="weather">${opts(WEATHER,r?.weather||'','—')}</select></label>
    <div class="full"><b class="small">Work done today</b><div id="workRows" class="rows">${work.map(workRow).join('')}</div><button type="button" class="btn sm" data-act="dpr-addwork">+ Add activity</button></div>
    <div class="full"><b class="small">Manpower</b><div id="manRows" class="rows">${man.map(manRow).join('')}</div>
-    <div class="btns"><button type="button" class="btn sm" data-act="dpr-addman">+ Add trade</button>${!r&&dprs.length?'<button type="button" class="btn sm" data-act="dpr-copyman">Copy from last DPR</button>':''}<span class="mute small" id="menTotal" style="align-self:center"></span></div></div>
+    <div class="btns"><button type="button" class="btn sm" data-act="dpr-addman">+ Add trade</button>${!id&&dprs.length?'<button type="button" class="btn sm" data-act="dpr-copyman">Copy from last DPR</button>':''}<span class="mute small" id="menTotal" style="align-self:center"></span></div></div>
    <label class="full">Equipment on site<textarea name="equipment" placeholder="e.g. 1 JCB, 1 mobile crane 25T, 2 concrete mixers" style="min-height:60px">${esc(r?.equipment||'')}</textarea></label>
    <label class="full">Remarks / delays / issues<textarea name="remarks" placeholder="e.g. Waiting for consultant inspection on slab, material delay for blocks">${esc(r?.remarks||'')}</textarea></label>
    <div class="full"><b class="small">Site photos</b><ul class="files" id="photoList" style="margin:6px 0"></ul>
     <label class="btn sm" style="width:max-content">Add photos<input id="photoIn" type="file" accept="image/*" multiple hidden></label></div>
    <p id="formMsg" class="full small late" role="alert"></p>
-   <div class="full btns"><button class="btn pri" type="submit" id="saveBtn">${r?'Save changes':'Save DPR'}</button><button class="btn" type="button" data-act="close">Cancel</button></div>
+   <div class="full btns"><button class="btn pri" type="submit" id="saveBtn">${id?'Save changes':'Save DPR'}</button><button class="btn" type="button" data-act="close">Cancel</button></div>
   </form>`);
   drawPhotos();menTotal();
   $('#photoIn').onchange=e=>{for(const f of e.target.files){if(f.size>20*1048576){toast(f.name+' is over 20 MB');continue}dprPhotosNew.push(f)}e.target.value='';drawPhotos()};
@@ -441,7 +445,7 @@ function photosView(){
       <button class="btn sm" data-act="pp-new" data-s="${esc(st)}">+ Photos</button></div>
      ${ph.length?`<div class="strip">${ph.slice(0,6).map((f,j)=>thumb(f,'stage:'+st,j)).join('')}${ph.length>6?`<button class="more" data-act="pp-stage" data-s="${esc(st)}">+${ph.length-6}</button>`:''}</div>`:''}
     </div></li>`}).join('');
-  return`<div class="top"><h1>Progress photos</h1><button class="btn pri sm" data-act="pp-new" data-s="">+ Add photos</button></div>
+  return`<div class="top"><h1>Progress photos</h1><div class="btns"><button class="btn sm" data-act="ai-sort">✨ AI sort photos</button><button class="btn pri sm" data-act="pp-new" data-s="">+ Add photos</button></div></div>
   <div class="filters" style="grid-template-columns:minmax(0,1fr)"><select id="fPPProj" aria-label="Project">${opts(projects.map(p=>({v:p.id,l:p.name})),ppProj,'All projects')}</select></div>
   <p class="mute small" style="margin:0 0 12px">${total} photos · ${new Set(list.map(x=>x.stage)).size} of ${stageList().length} stages recorded</p>
   <ol class="stages">${rows}</ol><button class="btn sm" data-act="pp-new" data-s="Other" style="margin-top:10px">+ Other stage</button>`;
@@ -530,6 +534,155 @@ async function lbShow(){
   const m=await signed([f.path]);if(m[f.path])img.src=m[f.path];
 }
 
+/* ---------- AI assistant (Claude via Supabase function "ai") ---------- */
+let chat=[],aiBusy=false,sortItems=[];
+const AI_MODEL='claude-sonnet-5-5';
+function nowText(){return new Date().toLocaleString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',timeZone:'Asia/Dubai'})+' (Dubai time)'}
+function aiContext(){
+  const P=id=>projName(id)||null;
+  return JSON.stringify({
+    today:today(),now:nowText(),
+    me:{username:username(),full_name:settings.full_name||null,job_title:settings.job_title||'Quantity Surveyor',phone:settings.phone||null,company:settings.company||'Al Adeeb Building Contracting LLC'},
+    projects:projects.map(p=>({id:p.id,name:p.name,code:p.code||null,client:p.client||null,contract_value_aed:p.value===''?null:p.value})),
+    documents:docs.map(d=>({id:d.id,type:d.category,project:P(d.project),project_id:d.project||null,title:d.title,ref:d.ref||null,party:d.party||null,amount_aed:d.amount===''?null:d.amount,status:d.status,currently_with:d.withp,submitted:d.submitted||null,due:d.due||null,overdue:!!isLate(d),notes:d.notes||null,files:d.files.map(f=>f.name),last_update:d.history.length?d.history[d.history.length-1]:null,updated:d.updated})),
+    dprs:dprs.slice(0,60).map(r=>({id:r.id,date:r.date,project:P(r.project),weather:r.weather||null,work:r.work,manpower:r.manpower,total_manpower:menCount(r),equipment:r.equipment||null,remarks:r.remarks||null,photos:r.photos.length})),
+    progress_photos:pphotos.map(x=>({id:x.id,project:P(x.project),stage:x.stage,location:x.location||null,date:x.date,note:x.note||null,photos:x.photos.length})),
+    lists:{document_types:CATS,statuses:STATUSES,currently_with_options:WITH,construction_stages:STAGES,weather:WEATHER}
+  });
+}
+function aiSystem(){
+  return `You are the AI assistant inside "ADCC QS Register", the app a Quantity Surveyor at ${settings.company||'Al Adeeb Building Contracting LLC'} (Dubai, UAE) uses to track payments/IPAs, tenders, BOQs, measurement sheets, variations, RFIs, NCRs, daily progress reports (DPR) and site progress photos.
+Current date and time: ${nowText()}. Today's ISO date: ${today()}. Currency: AED. Use UAE/GCC construction and FIDIC terminology.
+
+Rules:
+- Base every fact, amount, reference, date and status on APP DATA below. Never invent amounts, reference numbers, names or emails. If something is missing, put a clear placeholder like [consultant name] and say what's missing.
+- When the user wants something done, CALL A TOOL so they can review and apply it: draft_email for any email/letter; prepare_dpr to fill a daily progress report; prepare_document to add a register entry; update_document to change status / who has it / due date. You may call several tools in one reply.
+- Emails: professional, concise, UAE business style. Automatically include today's date, project name, document references, amounts, submission dates and how long it is pending where relevant. Sign off with the user's name, job title, company and phone from "me" (placeholders if missing).
+- When fixing dates: "today" = ${today()}; "yesterday" = ${localISO(Date.now()-864e5)}.
+- Answers to questions: short, clear, with numbers and totals. Use simple bullet lists. No long essays.
+
+APP DATA (JSON):
+${aiContext()}`;
+}
+const AI_TOOLS=[
+ {name:'draft_email',description:'Draft an email or letter for the user to review, copy or open in their mail app.',input_schema:{type:'object',properties:{to:{type:'string',description:'Recipient email(s) if known, else empty'},cc:{type:'string'},subject:{type:'string'},body:{type:'string',description:'Full plain-text email body including greeting and signature'}},required:['subject','body']}},
+ {name:'prepare_dpr',description:'Prepare a daily progress report. Opens a pre-filled DPR form for the user to check and save.',input_schema:{type:'object',properties:{date:{type:'string',description:'YYYY-MM-DD'},project_id:{type:'string'},weather:{type:'string'},work:{type:'array',items:{type:'object',properties:{activity:{type:'string'},location:{type:'string'},qty:{type:'number'},unit:{type:'string'}},required:['activity']}},manpower:{type:'array',items:{type:'object',properties:{trade:{type:'string'},count:{type:'number'}},required:['trade','count']}},equipment:{type:'string'},remarks:{type:'string'}},required:['date']}},
+ {name:'prepare_document',description:'Prepare a new register entry (IPA, VO, RFI, tender, etc). Opens a pre-filled form for the user to check and save.',input_schema:{type:'object',properties:{category:{type:'string'},project_id:{type:'string'},title:{type:'string'},ref:{type:'string'},party:{type:'string'},amount:{type:'number'},status:{type:'string'},with_party:{type:'string'},submitted:{type:'string'},due:{type:'string'},notes:{type:'string'}},required:['title','category']}},
+ {name:'update_document',description:'Change the status, who currently has it, or due date of an existing register document. User confirms before it is saved.',input_schema:{type:'object',properties:{document_id:{type:'string'},status:{type:'string'},with_party:{type:'string'},due:{type:'string'},note:{type:'string',description:'Short history note'}},required:['document_id']}}
+];
+async function callAI(body){
+  const {data,error}=await sb.functions.invoke('ai',{body:{model:AI_MODEL,...body}});
+  if(error){let m=error.message||'AI is not available.';try{const j=await error.context?.json?.();if(j?.error?.message)m=j.error.message}catch{}throw new Error(m)}
+  if(data?.error)throw new Error(data.error.message||'AI error');
+  return data;
+}
+const md=t=>esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^#{1,3} (.+)$/gm,'<b>$1</b>').replace(/^[-*] (.+)$/gm,'• $1');
+function aiOpen(prefill){
+  openSheet(`<div class="ph"><div><div class="cat">Powered by Claude</div><h2>✨ AI assistant</h2></div><div class="btns"><button class="btn sm" data-act="ai-clear">New chat</button><button class="x" data-act="close" aria-label="Close">×</button></div></div>
+  <div class="chat" id="chat"></div>
+  <form class="chatin" id="aiForm"><textarea id="aiIn" rows="2" placeholder="Ask anything, or tell me what to do… (tap 🎤 on your keyboard to speak)"></textarea><button class="btn pri" id="aiSend" type="submit">Send</button></form>`);
+  drawChat();
+  $('#aiForm').onsubmit=e=>{e.preventDefault();const v=$('#aiIn').value.trim();if(v)aiSend(v)};
+  $('#aiIn').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&window.innerWidth>900){e.preventDefault();$('#aiForm').requestSubmit()}};
+  if(prefill)aiSend(prefill);
+}
+const SUGGEST=['Write today\'s DPR: ','Which payments are pending and with whom?','Email the consultant to follow up all overdue IPAs','Weekly progress & payment summary for my senior','Which construction stages have no photos yet?'];
+function drawChat(){
+  const c=$('#chat');if(!c)return;
+  c.innerHTML=(chat.length?'':`<div class="aihello"><p><b>Hi${settings.full_name?' '+esc(settings.full_name.split(' ')[0]):''}!</b> I can see all your documents, DPRs and photos. Ask me a question or tell me what to prepare. I'll fill in dates, references and amounts automatically.</p><div class="sugg">${SUGGEST.map(s=>`<button class="chip" data-act="ai-sugg" data-t="${esc(s)}">${esc(s.replace(/: $/,'…'))}</button>`).join('')}</div></div>`)+
+   chat.map((m,i)=>m.role==='user'?`<div class="msg me">${esc(m.text)}</div>`:`<div class="msg ai">${m.text?`<div>${md(m.text)}</div>`:''}${(m.actions||[]).map((a,j)=>actionCard(a,i,j)).join('')}</div>`).join('')+
+   (aiBusy?'<div class="msg ai typing">Thinking…</div>':'');
+  c.scrollTop=c.scrollHeight;$('#panel').scrollTop=$('#panel').scrollHeight;
+}
+function actionCard(a,i,j){
+  const k=`data-i="${i}" data-j="${j}"`,v=a.input||{};
+  if(a.name==='draft_email')return`<div class="acard"><div class="ah">✉️ Email draft</div>${v.to?`<div class="small"><b>To:</b> ${esc(v.to)}</div>`:''}${v.cc?`<div class="small"><b>Cc:</b> ${esc(v.cc)}</div>`:''}<div class="small"><b>Subject:</b> ${esc(v.subject)}</div><pre class="mail">${esc(v.body)}</pre><div class="btns"><button class="btn sm pri" data-act="ai-copy" ${k}>Copy</button><button class="btn sm" data-act="ai-mail" ${k}>Open in email app</button></div></div>`;
+  if(a.name==='prepare_dpr')return`<div class="acard"><div class="ah">📋 DPR ready · ${esc(fmtDate(v.date))}</div><div class="small mute">${(v.work||[]).length} activities · ${(v.manpower||[]).reduce((s,m)=>s+(Number(m.count)||0),0)} manpower${v.remarks?' · remarks':''}</div><div class="btns"><button class="btn sm pri" data-act="ai-dpr" ${k}>Review & save</button></div></div>`;
+  if(a.name==='prepare_document')return`<div class="acard"><div class="ah">📄 New ${esc(v.category||'document')}</div><div class="small"><b>${esc(v.title)}</b>${v.amount!=null?' · '+money(v.amount):''}${v.status?' · '+esc(v.status):''}</div><div class="btns"><button class="btn sm pri" data-act="ai-doc" ${k}>Review & save</button></div></div>`;
+  if(a.name==='update_document'){const d=docs.find(x=>x.id===v.document_id);return`<div class="acard"><div class="ah">🔄 Update ${esc(d?.title||'document')}</div><div class="small">${v.status?`Status → <b>${esc(v.status)}</b> `:''}${v.with_party?`· With → <b>${esc(v.with_party)}</b> `:''}${v.due?`· Due → <b>${esc(fmtDate(v.due))}</b>`:''}${v.note?`<br><span class="mute">${esc(v.note)}</span>`:''}</div><div class="btns">${a.done?'<span class="stamp c-green">Applied</span>':`<button class="btn sm pri" data-act="ai-upd" ${k}>Apply</button>`}</div></div>`}
+  return'';
+}
+async function aiSend(text){
+  if(aiBusy)return;chat.push({role:'user',text});aiBusy=true;const inp=$('#aiIn');if(inp)inp.value='';drawChat();
+  const messages=chat.slice(-16).map(m=>({role:m.role==='user'?'user':'assistant',content:m.role==='user'?m.text:((m.text||'')+(m.actions?.length?`\n[I prepared: ${m.actions.map(a=>a.name+' '+JSON.stringify(a.input).slice(0,300)).join('; ')}]`:''))||'(done)'}));
+  try{
+    const r=await callAI({system:aiSystem(),messages,tools:AI_TOOLS,max_tokens:3000});
+    const blocks=r.content||[];
+    chat.push({role:'assistant',text:blocks.filter(b=>b.type==='text').map(b=>b.text).join('\n').trim(),actions:blocks.filter(b=>b.type==='tool_use').map(b=>({name:b.name,input:b.input}))});
+  }catch(e){chat.push({role:'assistant',text:'⚠️ '+(e.message||'AI error')+(String(e.message).match(/not found|404|FunctionsFetchError|Failed to send/i)?'\n\nThe AI function isn\'t set up in Supabase yet. Follow the AI setup steps.':'')})}
+  aiBusy=false;drawChat();
+}
+function aiAct(t){
+  const a=chat[+t.dataset.i]?.actions?.[+t.dataset.j];if(!a)return;const v=a.input||{},act=t.dataset.act;
+  if(act==='ai-copy'){const txt=(v.to?`To: ${v.to}\n`:'')+(v.cc?`Cc: ${v.cc}\n`:'')+`Subject: ${v.subject}\n\n${v.body}`;navigator.clipboard.writeText(txt).then(()=>toast('Email copied'),()=>toast('Copy failed, select the text and copy'))}
+  else if(act==='ai-mail'){location.href=`mailto:${encodeURIComponent(v.to||'')}?subject=${encodeURIComponent(v.subject||'')}${v.cc?'&cc='+encodeURIComponent(v.cc):''}&body=${encodeURIComponent(v.body||'')}`}
+  else if(act==='ai-dpr'){if(dprMissing)return toast('Run the DPR setup script first');dprForm(null,{date:v.date||today(),project:projects.some(p=>p.id===v.project_id)?v.project_id:'',weather:WEATHER.includes(v.weather)?v.weather:'',work:(v.work||[]).map(w=>({activity:w.activity||'',location:w.location||'',qty:w.qty??'',unit:w.unit||''})),manpower:(v.manpower||[]).map(m=>({trade:m.trade,count:m.count})),equipment:v.equipment||'',remarks:v.remarks||'',photos:[]})}
+  else if(act==='ai-doc'){docForm(null,{category:CATS.includes(v.category)?v.category:'Other',project:projects.some(p=>p.id===v.project_id)?v.project_id:'',title:v.title||'',ref:v.ref||'',party:v.party||'',amount:v.amount??'',status:STATUSES.includes(v.status)?v.status:'Draft',withp:WITH.includes(v.with_party)?v.with_party:'Me',submitted:v.submitted||'',due:v.due||'',notes:v.notes||'',link:'',files:[],history:[]})}
+  else if(act==='ai-upd')applyUpdate(a,t);
+}
+async function applyUpdate(a,btn){
+  const v=a.input,d=docs.find(x=>x.id===v.document_id);if(!d)return toast('Document not found');
+  const st=STATUSES.includes(v.status)?v.status:d.status,w=WITH.includes(v.with_party)?v.with_party:d.withp,now=new Date().toISOString();
+  btn.disabled=true;
+  const row={status:st,with_party:w,updated_at:now,history:[...d.history,{t:now,status:st,withp:w,note:(v.note||'Updated')+' (via AI)'}]};if(v.due)row.due=v.due;
+  const {error}=await sb.from('documents').update(row).eq('id',d.id);
+  if(error){btn.disabled=false;return toast(errMsg(error))}
+  a.done=true;toast('Updated');await refresh(true);drawChat();
+}
+/* AI photo sorting */
+async function smallB64(file,max=768){
+  const bmp=await createImageBitmap(file);const sc=Math.min(1,max/Math.max(bmp.width,bmp.height));
+  const c=document.createElement('canvas');c.width=Math.round(bmp.width*sc);c.height=Math.round(bmp.height*sc);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);
+  return c.toDataURL('image/jpeg',0.7).split(',')[1];
+}
+function sortOpen(){
+  if(ppMissing)return toast('Run the photos setup script first');
+  sortItems=[];
+  openSheet(`<div class="ph"><div><div class="cat">Powered by Claude</div><h2>✨ AI sort photos</h2></div><button class="x" data-act="close" aria-label="Close">×</button></div>
+  <p class="mute" style="margin-top:0">Pick many site photos at once. AI looks at each one, puts it in the right construction stage and writes a short description. You check, then save all.</p>
+  <div class="form" style="margin-bottom:12px"><label>Project<select id="sortProj">${opts(projects.map(p=>({v:p.id,l:p.name})),ppProj||(projects.length===1?projects[0].id:''),'No project')}</select></label><label>Date taken<input id="sortDate" type="date" value="${today()}"></label></div>
+  <label class="btn pri" style="width:max-content">Choose photos<input id="sortIn" type="file" accept="image/*" multiple hidden></label>
+  <div id="sortList" class="sortlist"></div><p id="formMsg" class="small late" role="alert"></p><div id="sortSave"></div>`);
+  $('#sortIn').onchange=async e=>{const fs=[...e.target.files];e.target.value='';if(!fs.length)return;await sortRun(fs)};
+}
+async function sortRun(files){
+  const msg=$('#formMsg');msg.textContent='';
+  const start=sortItems.length;files.forEach(f=>sortItems.push({file:f,url:URL.createObjectURL(f),stage:'',location:'',desc:'',state:'…'}));drawSort();
+  for(let i=start;i<sortItems.length;i+=6){
+    const batch=sortItems.slice(i,i+6);batch.forEach(x=>x.state='AI is looking…');drawSort();
+    try{
+      const content=[];for(let k=0;k<batch.length;k++){content.push({type:'text',text:`Photo ${k}:`});content.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:await smallB64(batch[k].file)}})}
+      content.push({type:'text',text:`Classify each photo into exactly one of these construction stages: ${JSON.stringify([...STAGES,'Other'])}. Give a short location hint only if visible (e.g. "Footings", "Ground floor slab"), and a one-line factual description of the work shown.`});
+      const r=await callAI({max_tokens:1500,system:'You are a construction site photo classifier for a UAE building contractor. Be accurate and factual.',messages:[{role:'user',content}],tools:[{name:'classify_photos',description:'Return the stage for each photo',input_schema:{type:'object',properties:{items:{type:'array',items:{type:'object',properties:{index:{type:'integer'},stage:{type:'string'},location_hint:{type:'string'},description:{type:'string'}},required:['index','stage','description']}}},required:['items']}}],tool_choice:{type:'tool',name:'classify_photos'}});
+      const out=(r.content||[]).find(b=>b.type==='tool_use')?.input?.items||[];
+      batch.forEach((x,k)=>{const o=out.find(z=>z.index===k)||{};x.stage=[...STAGES,'Other'].includes(o.stage)?o.stage:'Other';x.location=o.location_hint||'';x.desc=o.description||'';x.state=''});
+    }catch(e){batch.forEach(x=>{x.state='';x.stage=x.stage||''});msg.textContent='AI: '+(e.message||'error')+'. You can still choose stages yourself.'}
+    drawSort();
+  }
+}
+function drawSort(){
+  const l=$('#sortList');if(!l)return;
+  l.innerHTML=sortItems.map((x,i)=>`<div class="sortrow"><img src="${x.url}" alt=""><div class="sortf">${x.state?`<span class="mute small">${esc(x.state)}</span>`:''}
+   <select data-si="${i}" data-k="stage">${opts([...STAGES,'Other'],x.stage,'Choose stage')}</select>
+   <input data-si="${i}" data-k="location" value="${esc(x.location)}" placeholder="Location">
+   <input data-si="${i}" data-k="desc" value="${esc(x.desc)}" placeholder="Description"></div>
+   <button type="button" class="x sm" data-act="sort-rm" data-i="${i}" aria-label="Remove">×</button></div>`).join('');
+  $('#sortSave').innerHTML=sortItems.length&&!sortItems.some(x=>x.state)?`<button class="btn pri" data-act="sort-save" style="margin-top:12px">Save ${sortItems.length} photos into stages</button>`:'';
+  l.oninput=l.onchange=e=>{const i=e.target.dataset.si;if(i!=null)sortItems[+i][e.target.dataset.k]=e.target.value};
+}
+async function sortSave(btn){
+  if(sortItems.some(x=>!x.stage)){$('#formMsg').textContent='Choose a stage for every photo.';return}
+  busy=true;btn.disabled=true;const proj=$('#sortProj').value,date=$('#sortDate').value||today();
+  const groups={};sortItems.forEach(x=>{const key=x.stage+'|'+x.location;(groups[key]=groups[key]||[]).push(x)});
+  try{let n=0;
+    for(const key in groups){const g=groups[key],photos=[];
+      for(const x of g){btn.textContent=`Uploading ${++n} of ${sortItems.length}…`;const f=await compress(x.file);const path=await upload(f);photos.push({path,name:f.name,size:f.size})}
+      const {error}=await sb.from('progress_photos').insert({project_id:proj||null,stage:g[0].stage,location:g[0].location,taken_on:date,note:[...new Set(g.map(x=>x.desc).filter(Boolean))].join('\n'),photos});
+      if(error)throw error}
+    busy=false;closeSheet();toast('Photos saved into stages');if(proj)ppProj=proj;view='photos';refresh(true);
+  }catch(e){busy=false;btn.disabled=false;btn.textContent='Try again';$('#formMsg').textContent=errMsg(e)}
+}
+
 /* ---------- login ---------- */
 function showLogin(){
   $('#login').hidden=false;$('#gate').hidden=true;
@@ -592,6 +745,13 @@ document.addEventListener('click',async e=>{
   else if(a==='with'){Object.assign(F,{q:'',cat:'All',proj:'',status:'_open',withp:t.dataset.w});go('register')}
   else if(a==='go'){Object.assign(F,{q:'',cat:'All',proj:'',withp:'',status:{open:'_open',late:'_late',pend:'_pend',paid:'Paid'}[t.dataset.f]});go('register')}
   else if(a==='proj-open'){Object.assign(F,{q:'',cat:'All',status:'',withp:'',proj:id});go('register')}
+  else if(a==='ai'){if(loaded)aiOpen()}
+  else if(a==='ai-clear'){chat=[];drawChat()}
+  else if(a==='ai-sugg'){const t2=t.dataset.t;if(t2.endsWith(': ')){$('#aiIn').value=t2;$('#aiIn').focus()}else aiSend(t2)}
+  else if(['ai-copy','ai-mail','ai-dpr','ai-doc','ai-upd'].includes(a))aiAct(t);
+  else if(a==='ai-sort'){if(loaded)sortOpen()}
+  else if(a==='sort-rm'){sortItems.splice(+t.dataset.i,1);drawSort()}
+  else if(a==='sort-save')sortSave(t);
   else if(a==='pp-new'){if(loaded&&!ppMissing)ppForm(null,t.dataset.s);else if(ppMissing)go('photos')}
   else if(a==='pp-stage')stageSheet(t.dataset.s);
   else if(a==='pp-edit')ppForm(id);
