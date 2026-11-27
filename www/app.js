@@ -534,7 +534,7 @@ async function lbShow(){
   const m=await signed([f.path]);if(m[f.path])img.src=m[f.path];
 }
 
-/* ---------- AI assistant (Claude via Supabase function "ai") ---------- */
+/* ---------- AI assistant (Gemini via Supabase function "ai") ---------- */
 let chat=[],aiBusy=false,sortItems=[];
 const AI_MODEL='claude-sonnet-5-5';
 function nowText(){return new Date().toLocaleString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',timeZone:'Asia/Dubai'})+' (Dubai time)'}
@@ -578,7 +578,7 @@ async function callAI(body){
 }
 const md=t=>esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^#{1,3} (.+)$/gm,'<b>$1</b>').replace(/^[-*] (.+)$/gm,'• $1');
 function aiOpen(prefill){
-  openSheet(`<div class="ph"><div><div class="cat">Powered by Claude</div><h2>✨ AI assistant</h2></div><div class="btns"><button class="btn sm" data-act="ai-clear">New chat</button><button class="x" data-act="close" aria-label="Close">×</button></div></div>
+  openSheet(`<div class="ph"><div><div class="cat">Powered by Gemini</div><h2>✨ AI assistant</h2></div><div class="btns"><button class="btn sm" data-act="ai-clear">New chat</button><button class="x" data-act="close" aria-label="Close">×</button></div></div>
   <div class="chat" id="chat"></div>
   <form class="chatin" id="aiForm"><textarea id="aiIn" rows="2" placeholder="Ask anything, or tell me what to do… (tap 🎤 on your keyboard to speak)"></textarea><button class="btn pri" id="aiSend" type="submit">Send</button></form>`);
   drawChat();
@@ -638,7 +638,7 @@ async function smallB64(file,max=768){
 function sortOpen(){
   if(ppMissing)return toast('Run the photos setup script first');
   sortItems=[];
-  openSheet(`<div class="ph"><div><div class="cat">Powered by Claude</div><h2>✨ AI sort photos</h2></div><button class="x" data-act="close" aria-label="Close">×</button></div>
+  openSheet(`<div class="ph"><div><div class="cat">Powered by Gemini</div><h2>✨ AI sort photos</h2></div><button class="x" data-act="close" aria-label="Close">×</button></div>
   <p class="mute" style="margin-top:0">Pick many site photos at once. AI looks at each one, puts it in the right construction stage and writes a short description. You check, then save all.</p>
   <div class="form" style="margin-bottom:12px"><label>Project<select id="sortProj">${opts(projects.map(p=>({v:p.id,l:p.name})),ppProj||(projects.length===1?projects[0].id:''),'No project')}</select></label><label>Date taken<input id="sortDate" type="date" value="${today()}"></label></div>
   <label class="btn pri" style="width:max-content">Choose photos<input id="sortIn" type="file" accept="image/*" multiple hidden></label>
