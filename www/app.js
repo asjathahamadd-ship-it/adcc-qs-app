@@ -643,7 +643,7 @@ function ppForm(id,stage){
    <div class="full voice" id="ppAiBox">
     <div class="vhead"><b>🎤 Tell the details by voice</b><span class="small mute">Say where it is, what work, and all readings, e.g. <i>"Casting tie beams TB1 to TB6 ground floor, C40, slump 110, concrete temp 31, 6 cubes, inspected by consultant, WIR 45"</i></span></div>
     <div class="vctl" id="vctl"></div>
-    <div class="small mute" id="ppAiMsg">After you stop recording, AI listens, looks at the photos and writes the engineering notes.</div>
+    <div class="small mute" id="ppAiMsg">After you stop recording, AI listens, looks at the photos and writes the engineering notes. The recording itself is not saved.</div>
     <details class="vtype"><summary>Or type details instead</summary><textarea name="readings" style="min-height:56px;margin-top:6px" placeholder="e.g. Grade C40, slump 110 mm, concrete temp 31°C, 6 cubes, WIR-045"></textarea><button type="button" class="btn sm pri" data-act="pp-ai" style="margin-top:6px">✨ Write notes</button></details>
    </div>
    <label class="full">Notes<textarea name="note" id="ppNote" style="min-height:120px" placeholder="Write your own notes, or tap ✨ Write notes">${esc(x?.note||'')}</textarea></label>
@@ -669,15 +669,14 @@ async function savePP(e){
   const fd=new FormData(e.target),g=k=>(fd.get(k)||'').toString().trim(),msg=$('#formMsg');
   let stage=g('stage');if(stage==='Other')stage=g('other')||'Other';
   if(!stage){msg.textContent='Please choose a stage.';return}
-  if(!ppNew.length&&!ppKept.length&&!ppVoice){msg.textContent='Add at least one photo or video.';return}
-  if(!g('note')&&!ppVoice&&!ppKept.some(isAud)&&!ppNoDetOk){msg.innerHTML='⚠️ <b>No details added.</b> Tap 🎤 and say what this work is (location, readings, tests), or tap Save again to save without details.';ppNoDetOk=true;$('#ppAiBox').classList.add('nudge');$('#ppAiBox').scrollIntoView({behavior:'smooth',block:'center'});return}
+  if(!ppNew.length&&!ppKept.length){msg.textContent='Add at least one photo or video.';return}
+  if(!g('note')&&!ppNoDetOk){msg.innerHTML='⚠️ <b>No details added.</b> Tap 🎤 and say what this work is (location, readings, tests), or tap Save again to save without details.';ppNoDetOk=true;$('#ppAiBox').classList.add('nudge');$('#ppAiBox').scrollIntoView({behavior:'smooth',block:'center'});return}
   const btn=$('#saveBtn');busy=true;btn.disabled=true;msg.textContent='';
   const photos=[...ppKept],uploaded=[];
   try{
     for(let i=0;i<ppNew.length;i++){btn.textContent=`Uploading ${i+1} of ${ppNew.length}…`;
       const f=await compress(ppNew[i]);
       try{const path=await upload(f);uploaded.push(path);photos.push({path,name:f.name,size:f.size,type:f.type||''})}catch(err){err.upload=ppNew[i].name;throw err}}
-    if(ppVoice){btn.textContent='Uploading voice note…';const path=await upload(ppVoice);uploaded.push(path);photos.push({path,name:ppVoice.name,size:ppVoice.size,type:'audio/wav'})}
     btn.textContent='Saving…';
     const row={project_id:g('project')||null,stage,location:g('location'),taken_on:g('date')||today(),note:g('note'),photos,updated_at:new Date().toISOString()};
     const {error}=editingPP?await sb.from('progress_photos').update(row).eq('id',editingPP):await sb.from('progress_photos').insert(row);
