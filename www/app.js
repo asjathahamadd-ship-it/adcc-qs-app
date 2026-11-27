@@ -16,9 +16,6 @@ const ST={Draft:'grey',Submitted:'blue','Under review':'amber','Revise & resubmi
 
 let user=null,loaded=false,docs=[],projects=[],settings={},logoUrl='',dprs=[],dprMissing=false;
 const F2={proj:''};let pphotos=[],ppMissing=false,ppProj='',ppNew=[],ppKept=[],ppRemoved=[],editingPP=null,lbList=[],lbIdx=0;const urlCache={};let dprPhotosNew=[],dprPhotosKept=[],dprPhotosRemoved=[],editingDpr=null;
-const WEATHER=['Sunny','Hot','Humid','Windy','Dusty / sandstorm','Cloudy','Rain'];
-const TRADES=['Foreman','Mason','Steel fixer','Carpenter','Labour / helper','Electrician','Plumber','Painter','Plasterer','Tile fixer','Welder','Scaffolder','Operator','Driver','Supervisor','Engineer','Safety officer'];
-const UNITS=['m²','m³','m','nos','kg','ton','LS','%'];
 const F={q:'',cat:'All',proj:'',status:'',withp:'',sort:'updated'};
 let view='home',pendingFiles=[],keptFiles=[],removedFiles=[],editingId=null,busy=false,signup=false;
 
@@ -59,7 +56,7 @@ async function load(){
   const pp=await sb.from('progress_photos').select('*').order('taken_on',{ascending:false});
   if(pp.error){pphotos=[];ppMissing=true}else{ppMissing=false;pphotos=pp.data.map(x=>({id:x.id,project:x.project_id||'',stage:x.stage||'Other',location:x.location||'',date:x.taken_on,note:x.note||'',photos:x.photos||[]}))}
   const r=await sb.from('dprs').select('*').order('report_date',{ascending:false});
-  if(r.error){dprs=[];dprMissing=true}else{dprMissing=false;dprs=r.data.map(x=>({id:x.id,project:x.project_id||'',date:x.report_date,weather:x.weather||'',work:x.work||[],manpower:x.manpower||[],equipment:x.equipment||'',remarks:x.remarks||'',photos:x.photos||[],updated:x.updated_at}))}
+  if(r.error){dprs=[];dprMissing=true}else{dprMissing=false;dprs=r.data.map(x=>({id:x.id,project:x.project_id||'',date:x.report_date,weather:x.weather||'',work:x.work||[],manpower:x.manpower||[],equipment:x.equipment||'',remarks:x.remarks||'',photos:x.photos||[],details:x.details||null,equipment:x.equipment||'',updated:x.updated_at}))}
   const prevLogo=settings.logo_path;settings=s.data||{};
   if(settings.logo_path&&settings.logo_path!==prevLogo){const {data}=await sb.storage.from(BUCKET).createSignedUrl(settings.logo_path,60*60*24*7);logoUrl=data?.signedUrl||''}
   if(!settings.logo_path)logoUrl='';
@@ -326,98 +323,204 @@ function settingsForm(){
   };
 }
 
-/* ---------- DPR (daily progress report) ---------- */
-const menCount=r=>r.manpower.reduce((s,m)=>s+(Number(m.count)||0),0);
+/* ---------- DPR (daily progress report) — ADCC format ---------- */
+const WEATHER=['Sunny','Cloudy','Rainy','Windy','Dusty'];
+const UNITS=['m²','m³','m','nos','kg','ton','LS','bags','trips'];
+const DEF={
+  staff:['Project Manager','Project Engineer','Site Engineer','Chemical Engineer','Quantity Surveyor','Mechanical & AC Engineer - MEP','Electrical Engineer - MEP','F.F & F.A Engineer - MEP','Document Controller','Surveyor','Safety Officer','Electrical & Plumbing Foreman - MEP','Safety Assistant','Steel Foreman','Surveyor Assist.'],
+  labour:['Storekeeper + Assist. (Civil & MEP)','Carpenter & Foreman','Steel Fixer','Mason','Helper','Painter & Paint Foreman','Electrician - MEP','Plumber - MEP','A/C Technician - MEP','Office Boy','Chargehand','Waterproofing + Foreman','JCB Operator','Fire Fighting & Fire Alarm - MEP','Aluminum Works'],
+  subs:['Block Works','Steel Fixer','RFI Waterproofing','Dwex Dewatering'],
+  others:['Al Bayan MEP Sub-Contractor','JCB Operator','Shewal Operator','Bobcat Operator','Crane Operator'],
+  equipment:['Tower Crane','3 Ton Pickup','Bar Bending Machine','Dewatering Pump','Bar Cutting Machine','Excavator','Mobile Crane','Compressor','Generator 60kV','Bobcat','Thread Machine Coupler','Pressed Machine Coupler','Diesel Tank','JCB']
+};
+const QLISTS=[['staff','Manpower on site: staff / designation','Total staff'],['labour','Labour / tradesmen','Total labour'],['subs','Sub-contractors on site','Total'],['others','Other sub-contractors / operators','Total'],['equipment','Plant & equipment','Total equipment']];
+const num=v=>Number(v)||0;
+const sumQ=a=>(a||[]).reduce((s,x)=>s+num(x.qty),0);
+function normDpr(r){
+  const d=r.details&&r.details.v===2?r.details:null;
+  if(d)return{...d,photos:r.photos||[]};
+  return{v:2,ref_no:'',location:'',employer:'',consultant:'',contractor:'',weather:{cond:r.weather||'',min:'',max:''},
+    staff:[],labour:(r.manpower||[]).map(m=>({name:m.trade,qty:m.count})),subs:[],others:[],
+    equipment:r.equipment?[{name:r.equipment,qty:''}]:[],materials:[],
+    tasks:(r.work||[]).map(w=>({description:[w.activity,w.location].filter(Boolean).join(' – '),qty:[w.qty,w.unit].filter(x=>x!==''&&x!=null).join(' ')})),
+    remarks:r.remarks||'',submitted_by:'',reviewed_by:'',photos:r.photos||[]};
+}
+const totals=d=>{const st=sumQ(d.staff),lb=sumQ(d.labour),sb=sumQ(d.subs)+sumQ(d.others);return{st,lb,sb,eq:sumQ(d.equipment),all:st+lb+sb}};
+const menCount=r=>totals(normDpr(r)).all;
+const lastDpr=proj=>[...dprs].filter(r=>!proj||r.project===proj).sort((x,y)=>(y.date||'').localeCompare(x.date||''))[0]||[...dprs].sort((x,y)=>(y.date||'').localeCompare(x.date||''))[0];
+const nextRef=ref=>ref?ref.replace(/(\d+)(?!.*\d)/,n=>String(+n+1)):'';
 function dprTodayCard(){
   if(dprMissing)return'';
   const t=dprs.filter(r=>r.date===today());
-  return`<button class="card dprtoday" data-act="${t.length?'dpr-open':'dpr-new'}" data-id="${t.length?esc(t[0].id):''}"><span><b>Today's DPR</b><span class="mute small">${t.length?`Done · ${t.length>1?t.length+' reports · ':''}${t.reduce((s,r)=>s+menCount(r),0)} manpower · ${t.reduce((s,r)=>s+r.work.length,0)} activities`:'Not filled yet. Tap to add.'}</span></span><span class="stamp ${t.length?'c-green':'c-amber'}">${t.length?'Filled':'Pending'}</span></button>`;
+  return`<button class="card dprtoday" data-act="${t.length?'dpr-open':'dpr-new'}" data-id="${t.length?esc(t[0].id):''}"><span><b>Today's DPR</b><span class="mute small">${t.length?`Done · ${t.reduce((s,r)=>s+menCount(r),0)} total manpower`:'Not filled yet. Tap to add.'}</span></span><span class="stamp ${t.length?'c-green':'c-amber'}">${t.length?'Filled':'Pending'}</span></button>`;
 }
 function dprView(){
-  if(dprMissing)return`<div class="top"><h1>Daily progress</h1></div><div class="empty"><h2>One-time setup needed</h2><p>The DPR table hasn't been created in Supabase yet. Run the DPR setup script in the Supabase SQL Editor, then tap Refresh.</p><button class="btn pri" data-act="refresh">↻ Refresh</button></div>`;
+  if(dprMissing)return`<div class="top"><h1>Daily progress</h1></div><div class="empty"><h2>One-time setup needed</h2><p>Run the DPR setup script in the Supabase SQL Editor, then tap Refresh.</p><button class="btn pri" data-act="refresh">↻ Refresh</button></div>`;
   const list=dprs.filter(r=>!F2.proj||r.project===F2.proj);
   return`<div class="top"><h1>Daily progress</h1><button class="btn pri sm" data-act="dpr-new">+ New DPR</button></div>
   <div class="filters" style="grid-template-columns:minmax(0,1fr)"><select id="fDprProj" aria-label="Project">${opts(projects.map(p=>({v:p.id,l:p.name})),F2.proj,'All projects')}</select></div>
-  <div class="list">${list.map(r=>{const p=projName(r.project);return`<button class="row" data-act="dpr-open" data-id="${esc(r.id)}">
-    <span class="head"><span class="stamp c-blue">${esc(fmtDate(r.date))}</span>${p?`<span class="cat">${esc(p)}</span>`:''}</span>
-    <span class="t">${r.work.length?esc(r.work.slice(0,2).map(w=>w.activity).filter(Boolean).join(', '))+(r.work.length>2?` +${r.work.length-2} more`:''):'No activities recorded'}</span><span class="amt">${menCount(r)} men</span>
-    <span class="m"><span>${r.work.length} activities</span>${r.photos.length?`<span>${r.photos.length} photos</span>`:''}${r.weather?`<span>${esc(r.weather)}</span>`:''}${r.remarks?'<span class="late">Has remarks</span>':''}</span></button>`}).join('')||`<div class="empty"><p>No daily reports yet. Add today's DPR: work done, manpower, photos and remarks.</p><button class="btn pri" data-act="dpr-new">+ New DPR</button></div>`}</div>`;
+  <div class="list">${list.map(r=>{const d=normDpr(r),t=totals(d),p=projName(r.project);return`<button class="row" data-act="dpr-open" data-id="${esc(r.id)}">
+    <span class="head"><span class="stamp c-blue">${esc(fmtDate(r.date))}</span>${d.ref_no?`<span class="cat">${esc(d.ref_no)}</span>`:''}${p?`<span class="cat">${esc(p)}</span>`:''}</span>
+    <span class="t">${d.tasks.length?esc(d.tasks.slice(0,2).map(x=>x.description).join(', '))+(d.tasks.length>2?` +${d.tasks.length-2} more`:''):'No tasks recorded'}</span><span class="amt">${t.all} men</span>
+    <span class="m"><span>Staff ${t.st}</span><span>Labour ${t.lb}</span><span>Sub-con ${t.sb}</span><span>Equip ${t.eq}</span>${r.photos.length?`<span>${r.photos.length} photos</span>`:''}</span></button>`}).join('')||`<div class="empty"><p>No daily reports yet.</p><button class="btn pri" data-act="dpr-new">+ New DPR</button></div>`}</div>`;
 }
-async function photoUrls(ph){
-  if(!ph.length)return{};const {data}=await sb.storage.from(BUCKET).createSignedUrls(ph.map(f=>f.path),3600);
-  const m={};(data||[]).forEach(d=>{if(d.signedUrl)m[d.path]=d.signedUrl});return m;
-}
-async function dprDetail(id){
+function dprDetail(id){
   const r=dprs.find(x=>x.id===id);if(!r)return closeSheet();
-  openSheet(`<div class="ph"><div><div class="cat">Daily progress report${projName(r.project)?' · '+esc(projName(r.project)):''}</div><h2>${esc(fmtDate(r.date))}</h2></div><button class="x" data-act="close" aria-label="Close">×</button></div>
-  ${r.weather?`<p class="mute" style="margin:0 0 6px">Weather: <b>${esc(r.weather)}</b></p>`:''}
-  <h3 class="sec">Work done (${r.work.length})</h3>
-  ${r.work.length?`<table class="dt"><thead><tr><th>Activity</th><th>Location</th><th class="num">Qty</th></tr></thead><tbody>${r.work.map(w=>`<tr><td>${esc(w.activity)}</td><td>${esc(w.location)}</td><td class="num">${w.qty!==''&&w.qty!=null?esc(w.qty)+' '+esc(w.unit||''):''}</td></tr>`).join('')}</tbody></table>`:'<p class="mute small">None recorded.</p>'}
-  <h3 class="sec">Manpower (${menCount(r)})</h3>
-  ${r.manpower.length?`<table class="dt"><tbody>${r.manpower.map(m=>`<tr><td>${esc(m.trade)}</td><td class="num">${esc(m.count)}</td></tr>`).join('')}<tr><td><b>Total</b></td><td class="num"><b>${menCount(r)}</b></td></tr></tbody></table>`:'<p class="mute small">None recorded.</p>'}
-  ${r.equipment?`<h3 class="sec">Equipment</h3><p style="white-space:pre-wrap;margin:0">${esc(r.equipment)}</p>`:''}
-  <h3 class="sec">Remarks / delays / issues</h3><p style="white-space:pre-wrap;margin:0" class="${r.remarks?'':'mute small'}">${r.remarks?esc(r.remarks):'None.'}</p>
-  <h3 class="sec">Photos (${r.photos.length})</h3><div class="pgrid" id="pgrid">${r.photos.map(()=>'<div class="ph-ph"></div>').join('')||'<p class="mute small">No photos.</p>'}</div>
-  <div class="btns" style="margin-top:22px"><button class="btn" data-act="dpr-edit" data-id="${esc(r.id)}">Edit</button><button class="btn danger" data-act="dpr-del" data-id="${esc(r.id)}">Delete</button></div><div id="delBox"></div>`);
-  const g=$('#pgrid');if(g&&r.photos.length){g.innerHTML=r.photos.map((f,j)=>thumb(f,'dpr:'+r.id,j)).join('');fillThumbs(g)}
+  const d=normDpr(r),t=totals(d),P=projName(r.project);
+  const qt=(rows,h)=>`<table class="rt"><thead><tr><th>No.</th><th>${esc(h)}</th><th class="num">Qty</th></tr></thead><tbody>${rows.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.name)}</td><td class="num">${num(x.qty)||''}</td></tr>`).join('')}</tbody></table>`;
+  const tot=(l,v)=>`<div class="rtot"><span>${esc(l)}</span><b>${v}</b></div>`;
+  openSheet(`<div class="ph noprint"><div><div class="cat">Daily progress report</div><h2>${esc(fmtDate(r.date))}</h2></div><button class="x" data-act="close" aria-label="Close">×</button></div>
+  <div class="btns noprint" style="margin-bottom:12px"><button class="btn sm" data-act="dpr-edit" data-id="${esc(r.id)}">Edit</button>${window.Capacitor?'':'<button class="btn sm" data-act="dpr-print">🖨 Print / Save PDF</button>'}<button class="btn sm danger" data-act="dpr-del" data-id="${esc(r.id)}">Delete</button></div><div id="delBox" class="noprint"></div>
+  <div class="rep" id="rep">
+   <div class="rhead"><span class="rlogo"><img src="${esc(logoUrl||LOGO)}" alt="ADCC"></span><div><div class="rtitle">DAILY PROGRESS REPORT</div><div class="rsub">${esc(d.location||P||'')}</div></div></div>
+   <div class="rinfo"><div><small>Employer</small><b>${esc(d.employer||'—')}</b></div><div><small>Consultant</small><b>${esc(d.consultant||'—')}</b></div><div><small>Contractor</small><b>${esc(d.contractor||'—')}</b></div><div><small>Ref. no.</small><b>${esc(d.ref_no||'—')}</b></div><div><small>Date</small><b>${esc(fmtDate(r.date))}</b></div></div>
+   <div class="rgrid">
+    <section><h4>Manpower on site</h4><div class="r2">${qt(d.staff,'Staff / designation')}${qt(d.labour,'Labour / tradesmen')}</div><div class="r2">${tot('Total staff',t.st)}${tot('Total labour',t.lb)}</div></section>
+    <section><h4>Weather & materials delivered</h4><div class="rweather">${WEATHER.map(w=>`<span class="${d.weather?.cond===w?'on':''}">${d.weather?.cond===w?'☑':'☐'} ${w}</span>`).join('')}<span>Min ${esc(d.weather?.min||'–')}°C</span><span>Max ${esc(d.weather?.max||'–')}°C</span></div>
+     <table class="rt"><thead><tr><th>No.</th><th>Material</th><th class="num">Qty</th><th>Unit</th></tr></thead><tbody>${(d.materials.length?d.materials:[{}]).map((m,i)=>`<tr><td>${i+1}</td><td>${esc(m.material||'')}</td><td class="num">${esc(m.qty??'')}</td><td>${esc(m.unit||'')}</td></tr>`).join('')}</tbody></table>
+     <h4 style="margin-top:12px">Plant & equipment</h4>${qt(d.equipment,'Equipment')}${tot('Total equipment',t.eq)}</section>
+    <section><h4>Sub-contractors on site</h4><div class="r2">${qt(d.subs,'Sub-contractor')}${qt(d.others,'Other sub-contractors')}</div><div class="r2">${tot('Total',sumQ(d.subs))}${tot('Total',sumQ(d.others))}</div></section>
+    <section><h4>Description of today's task</h4><table class="rt"><thead><tr><th>No.</th><th>Work description</th><th class="num">Qty</th></tr></thead><tbody>${d.tasks.map((x,i)=>`<tr><td>${i+1}</td><td>${esc(x.description)}</td><td class="num">${esc(x.qty??'')}</td></tr>`).join('')}</tbody></table>
+     <div class="rtot big"><span>Total manpower on site today (Staff + Labour + Sub-contractors)</span><b>${t.all}</b></div>
+     ${d.remarks?`<h4 style="margin-top:12px">Remarks / delays</h4><p style="white-space:pre-wrap;margin:0">${esc(d.remarks)}</p>`:''}</section>
+   </div>
+   <div class="rsign"><div><small>Submitted by — Contractor</small><b>${esc(d.submitted_by||'')}</b></div><div><small>Reviewed by</small><b>${esc(d.reviewed_by||'')}</b></div></div>
+   ${r.photos.length?`<h4 class="rph">Site photographs</h4><div class="pgrid rpg" id="pgrid">${r.photos.map((f,j)=>thumb(f,'dpr:'+r.id,j)).join('')}</div>`:''}
+  </div>`);
+  fillThumbs($('#panel'));
 }
-const workRow=w=>`<div class="wrow" data-row="work"><input data-k="activity" placeholder="Activity, e.g. Blockwork 200mm" value="${esc(w.activity||'')}"><input data-k="location" placeholder="Location / area" value="${esc(w.location||'')}"><input data-k="qty" type="number" inputmode="decimal" step="any" placeholder="Qty" value="${esc(w.qty??'')}"><input data-k="unit" list="unitList" placeholder="Unit" value="${esc(w.unit||'')}"><button type="button" class="x sm" data-act="dpr-rmrow" aria-label="Remove">×</button></div>`;
-const manRow=m=>`<div class="mrow" data-row="man"><input data-k="trade" list="tradeList" placeholder="Trade, e.g. Mason" value="${esc(m.trade||'')}"><input data-k="count" type="number" inputmode="numeric" min="0" placeholder="No." value="${esc(m.count??'')}"><button type="button" class="x sm" data-act="dpr-rmrow" aria-label="Remove">×</button></div>`;
+const qrow=(x,list)=>`<div class="qrow"><input data-k="name" value="${esc(x.name||'')}" placeholder="${list==='equipment'?'Equipment':'Name'}"><input data-k="qty" type="number" inputmode="numeric" min="0" step="any" value="${esc(x.qty??'')}" placeholder="0"><button type="button" class="x sm" data-act="dpr-rmrow" aria-label="Remove">×</button></div>`;
+const mrow=m=>`<div class="mrow3"><input data-k="material" value="${esc(m.material||'')}" placeholder="Material"><input data-k="qty" type="number" inputmode="decimal" step="any" value="${esc(m.qty??'')}" placeholder="Qty"><input data-k="unit" list="unitList" value="${esc(m.unit||'')}" placeholder="Unit"><button type="button" class="x sm" data-act="dpr-rmrow" aria-label="Remove">×</button></div>`;
+const trow=x=>`<div class="trow"><input data-k="description" value="${esc(x.description||'')}" placeholder="e.g. Steel reinforcement (columns & tie beam)"><input data-k="qty" value="${esc(x.qty??'')}" placeholder="Qty"><button type="button" class="x sm" data-act="dpr-rmrow" aria-label="Remove">×</button></div>`;
+function blankDpr(proj){
+  const L=lastDpr(proj),p=L?normDpr(L):null,me=[settings.full_name,settings.job_title].filter(Boolean);
+  const names=k=>(p&&p[k].length?p[k]:DEF[k].map(n=>({name:n}))).map(x=>({name:x.name,qty:''}));
+  return{v:2,ref_no:p?nextRef(p.ref_no):'',location:p?.location||'',employer:p?.employer||'',consultant:p?.consultant||'',contractor:p?.contractor||'ADCC',weather:{cond:'Sunny',min:'',max:''},
+    staff:names('staff'),labour:names('labour'),subs:names('subs'),others:names('others'),equipment:names('equipment'),materials:[],tasks:[],remarks:'',
+    submitted_by:p?.submitted_by||(me.length?`${me[0].toUpperCase()}${me[1]?' ('+me[1].toUpperCase()+')':''}`:''),reviewed_by:p?.reviewed_by||'',photos:[]};
+}
 function dprForm(id,pre){
-  const r=id?dprs.find(x=>x.id===id):(pre||null);editingDpr=id||null;
-  dprPhotosNew=[];dprPhotosKept=[...(r?.photos||[])];dprPhotosRemoved=[];
-  const work=r?.work?.length?r.work:[{}],man=r?.manpower?.length?r.manpower:[{}];
-  openSheet(`<div class="ph"><h2>${id?'Edit DPR':(pre?'New DPR (prepared by AI)':'New daily progress report')}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+  const r=id?dprs.find(x=>x.id===id):null;editingDpr=id||null;
+  const d=r?normDpr(r):(pre||blankDpr(F2.proj));
+  const date=r?.date||pre?.date||today(),proj=r?.project||pre?.project||F2.proj||(projects.length===1?projects[0].id:'');
+  if(!pre||!pre._keepPhotos){dprPhotosNew=[];dprPhotosKept=[...(r?.photos||[])];dprPhotosRemoved=[]}
+  const sec=([k,title,totLabel])=>`<fieldset class="dsec"><legend>${esc(title)}<span class="tot" data-tot="${k}"></span></legend><div class="qlist" data-list="${k}">${(d[k]||[]).map(x=>qrow(x,k)).join('')}</div><button type="button" class="btn sm" data-act="dpr-add" data-l="${k}">+ Add</button></fieldset>`;
+  openSheet(`<div class="ph"><h2>${id?'Edit DPR':(pre&&!pre._blank?'New DPR (filled by AI)':'New daily progress report')}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+  <div class="aifill"><div><b>✨ Fill from a DPR file</b><div class="small mute">Upload a DPR PDF or photo. AI reads every count: staff, labour, sub-contractors, equipment, tasks.</div></div><label class="btn sm pri">Upload PDF / photo<input id="dprAiIn" type="file" accept="application/pdf,image/*" multiple hidden></label></div>
   <form class="form" id="dprForm" novalidate>
-   <datalist id="tradeList">${TRADES.map(t=>`<option value="${esc(t)}">`).join('')}</datalist><datalist id="unitList">${UNITS.map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
-   <label>Date<input name="date" type="date" value="${esc(r?.date||today())}" required></label>
-   <label>Project<select name="project">${opts(projects.map(p=>({v:p.id,l:p.name})),r?.project||F2.proj||(projects.length===1?projects[0].id:''),'No project')}</select></label>
-   <label class="full">Weather<select name="weather">${opts(WEATHER,r?.weather||'','—')}</select></label>
-   <div class="full"><b class="small">Work done today</b><div id="workRows" class="rows">${work.map(workRow).join('')}</div><button type="button" class="btn sm" data-act="dpr-addwork">+ Add activity</button></div>
-   <div class="full"><b class="small">Manpower</b><div id="manRows" class="rows">${man.map(manRow).join('')}</div>
-    <div class="btns"><button type="button" class="btn sm" data-act="dpr-addman">+ Add trade</button>${!id&&dprs.length?'<button type="button" class="btn sm" data-act="dpr-copyman">Copy from last DPR</button>':''}<span class="mute small" id="menTotal" style="align-self:center"></span></div></div>
-   <label class="full">Equipment on site<textarea name="equipment" placeholder="e.g. 1 JCB, 1 mobile crane 25T, 2 concrete mixers" style="min-height:60px">${esc(r?.equipment||'')}</textarea></label>
-   <label class="full">Remarks / delays / issues<textarea name="remarks" placeholder="e.g. Waiting for consultant inspection on slab, material delay for blocks">${esc(r?.remarks||'')}</textarea></label>
-   <div class="full"><b class="small">Site photos</b><ul class="files" id="photoList" style="margin:6px 0"></ul>
-    <label class="btn sm" style="width:max-content">Add photos<input id="photoIn" type="file" accept="image/*" multiple hidden></label></div>
+   <datalist id="unitList">${UNITS.map(t=>`<option value="${esc(t)}">`).join('')}</datalist>
+   <label>Date<input name="date" type="date" value="${esc(date)}" required></label>
+   <label>Ref. no.<input name="ref_no" value="${esc(d.ref_no||'')}" placeholder="e.g. ADCC-AB-1"></label>
+   <label class="full">Project<select name="project">${opts(projects.map(p=>({v:p.id,l:p.name})),proj,'No project')}</select></label>
+   <label class="full">Plot no. / location<input name="location" value="${esc(d.location||'')}" placeholder="e.g. Plot No. 1340486 • Al Mamzar, Dubai"></label>
+   <label class="full">Employer<input name="employer" value="${esc(d.employer||'')}"></label>
+   <label>Consultant<input name="consultant" value="${esc(d.consultant||'')}"></label>
+   <label>Contractor<input name="contractor" value="${esc(d.contractor||'')}"></label>
+   <fieldset class="dsec full"><legend>Weather</legend><div class="chips">${WEATHER.map(w=>`<label class="chipr"><input type="radio" name="wcond" value="${w}"${d.weather?.cond===w?' checked':''}><span>${w}</span></label>`).join('')}</div>
+    <div class="r2f"><label>Min temp °C<input name="wmin" type="number" inputmode="decimal" value="${esc(d.weather?.min??'')}"></label><label>Max temp °C<input name="wmax" type="number" inputmode="decimal" value="${esc(d.weather?.max??'')}"></label></div></fieldset>
+   <div class="full">${QLISTS.slice(0,2).map(sec).join('')}</div>
+   <div class="full">${QLISTS.slice(2,4).map(sec).join('')}</div>
+   <div class="full">${sec(QLISTS[4])}</div>
+   <fieldset class="dsec full"><legend>Materials delivered today</legend><div class="qlist" data-list="materials">${(d.materials||[]).map(mrow).join('')}</div><button type="button" class="btn sm" data-act="dpr-add" data-l="materials">+ Add material</button></fieldset>
+   <fieldset class="dsec full"><legend>Description of today's task</legend><div class="qlist" data-list="tasks">${(d.tasks.length?d.tasks:[{}]).map(trow).join('')}</div><button type="button" class="btn sm" data-act="dpr-add" data-l="tasks">+ Add task</button></fieldset>
+   <div class="full grand" id="grand"></div>
+   <label class="full">Remarks / delays / issues<textarea name="remarks" style="min-height:60px">${esc(d.remarks||'')}</textarea></label>
+   <label>Submitted by<input name="submitted_by" value="${esc(d.submitted_by||'')}" placeholder="Name (designation)"></label>
+   <label>Reviewed by<input name="reviewed_by" value="${esc(d.reviewed_by||'')}" placeholder="Name (designation)"></label>
+   <div class="full"><b class="small">Site photographs</b><ul class="files" id="photoList" style="margin:6px 0"></ul>
+    <div class="btns"><label class="btn sm">📷 Take photo<input id="photoCam" type="file" accept="image/*" capture="environment" hidden></label><label class="btn sm">Add photos<input id="photoIn" type="file" accept="image/*" multiple hidden></label>${!id&&dprs.length?'<button type="button" class="btn sm" data-act="dpr-copyman">Copy numbers from last DPR</button>':''}</div></div>
    <p id="formMsg" class="full small late" role="alert"></p>
    <div class="full btns"><button class="btn pri" type="submit" id="saveBtn">${id?'Save changes':'Save DPR'}</button><button class="btn" type="button" data-act="close">Cancel</button></div>
   </form>`);
   drawPhotos();menTotal();
-  $('#photoIn').onchange=e=>{for(const f of e.target.files){if(f.size>20*1048576){toast(f.name+' is over 20 MB');continue}dprPhotosNew.push(f)}e.target.value='';drawPhotos()};
-  $('#dprForm').oninput=e=>{if(e.target.dataset.k==='count')menTotal()};
+  const addP=e=>{for(const f of e.target.files){if(f.size>25*1048576){toast(f.name+' is too large');continue}dprPhotosNew.push(f)}e.target.value='';drawPhotos()};
+  $('#photoIn').onchange=addP;$('#photoCam').onchange=addP;
+  $('#dprAiIn').onchange=async e=>{const fs=[...e.target.files];e.target.value='';if(fs.length)aiFillDpr(fs)};
+  $('#dprForm').oninput=e=>{if(e.target.dataset.k==='qty')menTotal()};
   $('#dprForm').onsubmit=saveDpr;
 }
-function menTotal(){const t=[...document.querySelectorAll('#manRows [data-k=count]')].reduce((s,i)=>s+(Number(i.value)||0),0);const el=$('#menTotal');if(el)el.textContent=`Total: ${t} men`}
+const readList=k=>[...document.querySelectorAll(`[data-list="${k}"]>div`)].map(row=>{const o={};row.querySelectorAll('[data-k]').forEach(i=>{const v=i.value.trim();o[i.dataset.k]=(i.dataset.k==='qty'&&i.type==='number')?(v===''?'':Number(v)):v});return o});
+function formDpr(){
+  const f=$('#dprForm'),g=k=>(f.elements[k]?.value||'').trim();
+  const keep=a=>a.filter(x=>Object.values(x).some(v=>v!==''&&v!=null));
+  return{v:2,ref_no:g('ref_no'),location:g('location'),employer:g('employer'),consultant:g('consultant'),contractor:g('contractor'),
+    weather:{cond:(f.querySelector('[name=wcond]:checked')||{}).value||'',min:g('wmin'),max:g('wmax')},
+    staff:keep(readList('staff')).filter(x=>x.name),labour:keep(readList('labour')).filter(x=>x.name),subs:keep(readList('subs')).filter(x=>x.name),others:keep(readList('others')).filter(x=>x.name),equipment:keep(readList('equipment')).filter(x=>x.name),
+    materials:keep(readList('materials')),tasks:keep(readList('tasks')),remarks:g('remarks'),submitted_by:g('submitted_by'),reviewed_by:g('reviewed_by')};
+}
+function menTotal(){
+  if(!$('#dprForm'))return;const s=k=>readList(k).reduce((a,x)=>a+num(x.qty),0);
+  const st=s('staff'),lb=s('labour'),sb=s('subs')+s('others');
+  QLISTS.forEach(([k])=>{const el=document.querySelector(`[data-tot="${k}"]`);if(el)el.textContent=' · '+s(k)});
+  $('#grand').innerHTML=`<span>Total manpower on site today<br><small>Staff ${st} + Labour ${lb} + Sub-contractors ${sb}</small></span><b>${st+lb+sb}</b>`;
+}
 function drawPhotos(){
   const l=$('#photoList');if(!l)return;
   l.innerHTML=dprPhotosKept.map((f,i)=>`<li><span>${esc(f.name)}</span><button type="button" class="link" data-act="dpr-rmkept" data-i="${i}">Remove</button></li>`).join('')+
    dprPhotosNew.map((f,i)=>`<li><span>${esc(f.name)} <span class="mute">(new)</span></span><button type="button" class="link" data-act="dpr-rmnew" data-i="${i}">Remove</button></li>`).join('');
 }
-const readRows=(sel,keys)=>[...document.querySelectorAll(sel)].map(row=>{const o={};keys.forEach(k=>{const v=row.querySelector(`[data-k=${k}]`).value.trim();o[k]=(k==='qty'||k==='count')?(v===''?'':Number(v)):v});return o});
 async function saveDpr(e){
   e.preventDefault();if(busy)return;
-  const fd=new FormData(e.target),g=k=>(fd.get(k)||'').toString().trim(),msg=$('#formMsg');
-  if(!g('date')){msg.textContent='Please pick a date.';return}
-  const work=readRows('#workRows .wrow',['activity','location','qty','unit']).filter(w=>w.activity||w.location||w.qty!=='');
-  const manpower=readRows('#manRows .mrow',['trade','count']).filter(m=>m.trade||m.count!=='');
-  if(!work.length&&!manpower.length&&!g('remarks')&&!dprPhotosNew.length&&!dprPhotosKept.length){msg.textContent='Add at least one activity, trade, remark or photo.';return}
+  const f=e.target,msg=$('#formMsg'),date=f.elements.date.value,proj=f.elements.project.value;
+  if(!date){msg.textContent='Please pick a date.';return}
+  const d=formDpr(),t=totals(d);
   const btn=$('#saveBtn');busy=true;btn.disabled=true;msg.textContent='';
   const photos=[...dprPhotosKept],uploaded=[];
   try{
-    for(let i=0;i<dprPhotosNew.length;i++){const f=dprPhotosNew[i];btn.textContent=`Uploading photo ${i+1} of ${dprPhotosNew.length}…`;
-      try{const path=await upload(f);uploaded.push(path);photos.push({path,name:f.name,size:f.size})}catch(err){err.upload=f.name;throw err}}
+    for(let i=0;i<dprPhotosNew.length;i++){btn.textContent=`Uploading photo ${i+1} of ${dprPhotosNew.length}…`;
+      const ff=await compress(dprPhotosNew[i]);
+      try{const path=await upload(ff);uploaded.push(path);photos.push({path,name:ff.name,size:ff.size})}catch(err){err.upload=dprPhotosNew[i].name;throw err}}
     btn.textContent='Saving…';
-    const row={project_id:g('project')||null,report_date:g('date'),weather:g('weather'),work,manpower,equipment:g('equipment'),remarks:g('remarks'),photos,updated_at:new Date().toISOString()};
+    const row={project_id:proj||null,report_date:date,weather:d.weather.cond,
+      work:d.tasks.map(x=>({activity:x.description,location:'',qty:x.qty,unit:''})),manpower:[...d.staff,...d.labour,...d.subs,...d.others].filter(x=>num(x.qty)).map(x=>({trade:x.name,count:num(x.qty)})),
+      equipment:d.equipment.filter(x=>num(x.qty)).map(x=>`${x.qty} ${x.name}`).join(', '),remarks:d.remarks,photos,details:{...d,total:t.all},updated_at:new Date().toISOString()};
     const {error}=editingDpr?await sb.from('dprs').update(row).eq('id',editingDpr):await sb.from('dprs').insert(row);
-    if(error)throw error;
+    if(error){if(/details/i.test(error.message||''))error.message='Run the new DPR setup script in Supabase (adds the "details" column).';throw error}
     await removeFiles(dprPhotosRemoved.map(f=>f.path));
     busy=false;closeSheet();toast('DPR saved');refresh(true);
   }catch(err){
     busy=false;btn.disabled=false;btn.textContent=editingDpr?'Save changes':'Save DPR';
     if(!err.upload)await removeFiles(uploaded);
-    msg.textContent=err.upload?`Couldn't upload ${err.upload}: ${err.message||'please try again'}`:errMsg(err);
+    msg.textContent=err.upload?`Couldn't upload ${err.upload}: ${err.message||'please try again'}`:(err.message&&/setup script/.test(err.message)?err.message:errMsg(err));
   }
+}
+/* AI: read a DPR file into the form */
+const QITEM={type:'array',items:{type:'object',properties:{name:{type:'string'},qty:{type:'number'}},required:['name','qty']}};
+const DPR_SCHEMA={type:'object',properties:{date:{type:'string',description:'YYYY-MM-DD'},project_id:{type:'string',description:'id from APP DATA projects if it matches'},ref_no:{type:'string'},location:{type:'string',description:'Plot no. and area, e.g. Plot No. 1340486 • Al Mamzar, Dubai'},employer:{type:'string'},consultant:{type:'string'},contractor:{type:'string'},
+  weather:{type:'object',properties:{cond:{type:'string',description:'Sunny, Cloudy, Rainy, Windy or Dusty'},min:{type:'number'},max:{type:'number'}}},
+  staff:{...QITEM,description:'Staff / designation rows with quantity'},labour:{...QITEM,description:'Labour / tradesmen rows with quantity'},subs:{...QITEM,description:'Sub-contractors on site (left table, e.g. pile breaking / specialist companies)'},others:{...QITEM,description:'Other sub-contractors and operators'},equipment:{...QITEM,description:'Plant & equipment rows with quantity'},
+  materials:{type:'array',items:{type:'object',properties:{material:{type:'string'},qty:{type:'number'},unit:{type:'string'}}}},
+  tasks:{type:'array',items:{type:'object',properties:{description:{type:'string'},qty:{type:'string'}},required:['description']}},
+  remarks:{type:'string'},submitted_by:{type:'string'},reviewed_by:{type:'string'}},required:['date']};
+const toB64=f=>new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(',')[1]);r.onerror=rej;r.readAsDataURL(f)});
+async function fileParts(files){
+  const parts=[];for(const f of files){
+    if(f.type==='application/pdf'||/\.pdf$/i.test(f.name)){if(f.size>15*1048576)throw new Error(f.name+' is too large (max 15 MB)');parts.push({type:'image',source:{type:'base64',media_type:'application/pdf',data:await toB64(f)}})}
+    else parts.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:await smallB64(f,1800)}});
+  }return parts;
+}
+function preFromAI(v){
+  v={...v};if(!v.labour&&v.manpower)v.labour=v.manpower.map(m=>({name:m.trade,qty:m.count}));if(!v.tasks&&v.work)v.tasks=v.work.map(w=>({description:[w.activity,w.location].filter(Boolean).join(' – '),qty:[w.qty,w.unit].filter(x=>x!=null&&x!=='').join(' ')}));
+  const cl=a=>(a||[]).filter(x=>x&&x.name).map(x=>({name:String(x.name),qty:x.qty??''}));
+  const base=blankDpr(projects.some(p=>p.id===v.project_id)?v.project_id:F2.proj);
+  const merge=(k)=>{const ai=cl(v[k]);if(!ai.length)return base[k];const out=base[k].map(x=>{const m=ai.find(a=>a.name.toLowerCase()===x.name.toLowerCase());return{name:x.name,qty:m?m.qty:''}});ai.forEach(a=>{if(!out.some(x=>x.name.toLowerCase()===a.name.toLowerCase()))out.push(a)});return out};
+  return{...base,date:v.date||today(),project:projects.some(p=>p.id===v.project_id)?v.project_id:'',ref_no:v.ref_no||base.ref_no,location:v.location||base.location,employer:v.employer||base.employer,consultant:v.consultant||base.consultant,contractor:v.contractor||base.contractor,
+    weather:{cond:WEATHER.find(w=>w.toLowerCase()===String(v.weather?.cond||'').toLowerCase())||'',min:v.weather?.min??'',max:v.weather?.max??''},
+    staff:merge('staff'),labour:merge('labour'),subs:merge('subs'),others:merge('others'),equipment:merge('equipment'),
+    materials:(v.materials||[]).map(m=>({material:m.material||'',qty:m.qty??'',unit:m.unit||''})),tasks:(v.tasks||[]).map(x=>({description:x.description||'',qty:x.qty??''})),
+    remarks:v.remarks||'',submitted_by:v.submitted_by||base.submitted_by,reviewed_by:v.reviewed_by||base.reviewed_by};
+}
+async function aiFillDpr(files){
+  const box=document.querySelector('.aifill');box.classList.add('busy');box.querySelector('.small').textContent='AI is reading your file… (10–40 seconds)';
+  try{
+    const content=[...await fileParts(files),{type:'text',text:'This is a daily progress report (DPR) from a UAE construction site. Read it carefully and extract EVERY row with its exact quantity: staff/designation, labour/tradesmen, sub-contractors, other sub-contractors/operators, plant & equipment, weather (condition and min/max temp), materials delivered, the description of today\'s tasks, header fields (employer, consultant, contractor, ref no, date, plot/location), submitted by and reviewed by. Rows with blank quantity = 0. Keep row names exactly as written. Today is '+today()+'.'}];
+    const r=await callAI({max_tokens:6000,system:'You extract construction daily progress report data accurately. Never invent numbers. Projects in the app: '+JSON.stringify(projects.map(p=>({id:p.id,name:p.name}))),messages:[{role:'user',content}],tools:[{name:'fill_dpr',description:'Return the full DPR data',input_schema:DPR_SCHEMA}],tool_choice:{type:'tool',name:'fill_dpr'}});
+    const v=(r.content||[]).find(b=>b.type==='tool_use')?.input;if(!v)throw new Error('AI could not read this file. Try a clearer PDF or photo.');
+    const keepNew=dprPhotosNew,keepKept=dprPhotosKept,keepRem=dprPhotosRemoved,eid=editingDpr;
+    const pre=preFromAI(v);pre._keepPhotos=true;dprPhotosNew=keepNew;dprPhotosKept=keepKept;dprPhotosRemoved=keepRem;
+    if(eid){dprForm(null,pre);editingDpr=eid;$('#saveBtn').textContent='Save changes'}else dprForm(null,pre);
+    const t=totals(pre);toast(`AI filled the DPR: ${t.all} total manpower. Please check before saving.`);
+  }catch(e){box.classList.remove('busy');box.querySelector('.small').textContent='⚠️ '+(e.message||'AI error')}
 }
 
 /* ---------- Progress photos ---------- */
@@ -535,7 +638,7 @@ async function lbShow(){
 }
 
 /* ---------- AI assistant (Gemini via Supabase function "ai") ---------- */
-let chat=[],aiBusy=false,sortItems=[];
+let chat=[],aiBusy=false,sortItems=[],chatFiles=[];
 const AI_MODEL='claude-sonnet-5-5';let AI_FN='ai';
 function nowText(){return new Date().toLocaleString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',timeZone:'Asia/Dubai'})+' (Dubai time)'}
 function aiContext(){
@@ -545,7 +648,7 @@ function aiContext(){
     me:{username:username(),full_name:settings.full_name||null,job_title:settings.job_title||'Quantity Surveyor',phone:settings.phone||null,company:settings.company||'Al Adeeb Building Contracting LLC'},
     projects:projects.map(p=>({id:p.id,name:p.name,code:p.code||null,client:p.client||null,contract_value_aed:p.value===''?null:p.value})),
     documents:docs.map(d=>({id:d.id,type:d.category,project:P(d.project),project_id:d.project||null,title:d.title,ref:d.ref||null,party:d.party||null,amount_aed:d.amount===''?null:d.amount,status:d.status,currently_with:d.withp,submitted:d.submitted||null,due:d.due||null,overdue:!!isLate(d),notes:d.notes||null,files:d.files.map(f=>f.name),last_update:d.history.length?d.history[d.history.length-1]:null,updated:d.updated})),
-    dprs:dprs.slice(0,60).map(r=>({id:r.id,date:r.date,project:P(r.project),weather:r.weather||null,work:r.work,manpower:r.manpower,total_manpower:menCount(r),equipment:r.equipment||null,remarks:r.remarks||null,photos:r.photos.length})),
+    dprs:dprs.slice(0,40).map(r=>{const d=normDpr(r),t=totals(d);return{id:r.id,date:r.date,project:P(r.project),ref_no:d.ref_no,weather:d.weather,staff:d.staff.filter(x=>num(x.qty)),labour:d.labour.filter(x=>num(x.qty)),subcontractors:[...d.subs,...d.others].filter(x=>num(x.qty)),equipment:d.equipment.filter(x=>num(x.qty)),materials:d.materials,tasks:d.tasks,totals:{staff:t.st,labour:t.lb,subcontractors:t.sb,total_manpower:t.all,equipment:t.eq},remarks:d.remarks||null,photos:r.photos.length}}),
     progress_photos:pphotos.map(x=>({id:x.id,project:P(x.project),stage:x.stage,location:x.location||null,date:x.date,note:x.note||null,photos:x.photos.length})),
     lists:{document_types:CATS,statuses:STATUSES,currently_with_options:WITH,construction_stages:STAGES,weather:WEATHER}
   });
@@ -566,7 +669,7 @@ ${aiContext()}`;
 }
 const AI_TOOLS=[
  {name:'draft_email',description:'Draft an email or letter for the user to review, copy or open in their mail app.',input_schema:{type:'object',properties:{to:{type:'string',description:'Recipient email(s) if known, else empty'},cc:{type:'string'},subject:{type:'string'},body:{type:'string',description:'Full plain-text email body including greeting and signature'}},required:['subject','body']}},
- {name:'prepare_dpr',description:'Prepare a daily progress report. Opens a pre-filled DPR form for the user to check and save.',input_schema:{type:'object',properties:{date:{type:'string',description:'YYYY-MM-DD'},project_id:{type:'string'},weather:{type:'string'},work:{type:'array',items:{type:'object',properties:{activity:{type:'string'},location:{type:'string'},qty:{type:'number'},unit:{type:'string'}},required:['activity']}},manpower:{type:'array',items:{type:'object',properties:{trade:{type:'string'},count:{type:'number'}},required:['trade','count']}},equipment:{type:'string'},remarks:{type:'string'}},required:['date']}},
+ {name:'prepare_dpr',description:'Prepare a full daily progress report in ADCC format (staff, labour, sub-contractors, equipment, weather, materials, tasks). Opens a pre-filled DPR form for the user to check and save. When the user uploads a DPR file, extract every row and quantity exactly.',input_schema:DPR_SCHEMA},
  {name:'prepare_document',description:'Prepare a new register entry (IPA, VO, RFI, tender, etc). Opens a pre-filled form for the user to check and save.',input_schema:{type:'object',properties:{category:{type:'string'},project_id:{type:'string'},title:{type:'string'},ref:{type:'string'},party:{type:'string'},amount:{type:'number'},status:{type:'string'},with_party:{type:'string'},submitted:{type:'string'},due:{type:'string'},notes:{type:'string'}},required:['title','category']}},
  {name:'update_document',description:'Change the status, who currently has it, or due date of an existing register document. User confirms before it is saved.',input_schema:{type:'object',properties:{document_id:{type:'string'},status:{type:'string'},with_party:{type:'string'},due:{type:'string'},note:{type:'string',description:'Short history note'}},required:['document_id']}}
 ];
@@ -581,33 +684,37 @@ const md=t=>esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>').replace(/^#{1,3} (.+)$/
 function aiOpen(prefill){
   openSheet(`<div class="ph"><div><div class="cat">Powered by Gemini</div><h2>✨ AI assistant</h2></div><div class="btns"><button class="btn sm" data-act="ai-clear">New chat</button><button class="x" data-act="close" aria-label="Close">×</button></div></div>
   <div class="chat" id="chat"></div>
-  <form class="chatin" id="aiForm"><textarea id="aiIn" rows="2" placeholder="Ask anything, or tell me what to do… (tap 🎤 on your keyboard to speak)"></textarea><button class="btn pri" id="aiSend" type="submit">Send</button></form>`);
+  <div id="aiFiles" class="aifiles"></div><form class="chatin" id="aiForm"><label class="btn attach" title="Attach PDF or photo">📎<input id="aiFile" type="file" accept="application/pdf,image/*" multiple hidden></label><textarea id="aiIn" rows="2" placeholder="Ask anything, or tell me what to do… (tap 🎤 on your keyboard to speak)"></textarea><button class="btn pri" id="aiSend" type="submit">Send</button></form>`);
   drawChat();
-  $('#aiForm').onsubmit=e=>{e.preventDefault();const v=$('#aiIn').value.trim();if(v)aiSend(v)};
+  $('#aiFile').onchange=e=>{chatFiles.push(...e.target.files);e.target.value='';drawAiFiles()};drawAiFiles();
+  $('#aiForm').onsubmit=e=>{e.preventDefault();const v=$('#aiIn').value.trim();if(v||chatFiles.length)aiSend(v||'Read the attached file. If it is a DPR, prepare the DPR with every staff, labour, sub-contractor and equipment count.')};
   $('#aiIn').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey&&window.innerWidth>900){e.preventDefault();$('#aiForm').requestSubmit()}};
   if(prefill)aiSend(prefill);
 }
-const SUGGEST=['Write today\'s DPR: ','Which payments are pending and with whom?','Email the consultant to follow up all overdue IPAs','Weekly progress & payment summary for my senior','Which construction stages have no photos yet?'];
+const SUGGEST=['📎 Upload a DPR PDF and I\'ll fill everything','Write today\'s DPR: ','Which payments are pending and with whom?','Email the consultant to follow up all overdue IPAs','Weekly progress & payment summary for my senior','Which construction stages have no photos yet?'];
+function drawAiFiles(){const b=$('#aiFiles');if(b)b.innerHTML=chatFiles.map((f,i)=>`<span class="chip">📄 ${esc(f.name)} <button type="button" class="link" data-act="ai-rmfile" data-i="${i}">×</button></span>`).join('')}
 function drawChat(){
   const c=$('#chat');if(!c)return;
   c.innerHTML=(chat.length?'':`<div class="aihello"><p><b>Hi${settings.full_name?' '+esc(settings.full_name.split(' ')[0]):''}!</b> I can see all your documents, DPRs and photos. Ask me a question or tell me what to prepare. I'll fill in dates, references and amounts automatically.</p><div class="sugg">${SUGGEST.map(s=>`<button class="chip" data-act="ai-sugg" data-t="${esc(s)}">${esc(s.replace(/: $/,'…'))}</button>`).join('')}</div></div>`)+
-   chat.map((m,i)=>m.role==='user'?`<div class="msg me">${esc(m.text)}</div>`:`<div class="msg ai">${m.text?`<div>${md(m.text)}</div>`:''}${(m.actions||[]).map((a,j)=>actionCard(a,i,j)).join('')}</div>`).join('')+
+   chat.map((m,i)=>m.role==='user'?`<div class="msg me">${esc(m.text)}${m.fnames?.length?`<div class="small" style="opacity:.8">📎 ${esc(m.fnames.join(', '))}</div>`:''}</div>`:`<div class="msg ai">${m.text?`<div>${md(m.text)}</div>`:''}${(m.actions||[]).map((a,j)=>actionCard(a,i,j)).join('')}</div>`).join('')+
    (aiBusy?'<div class="msg ai typing">Thinking…</div>':'');
   c.scrollTop=c.scrollHeight;$('#panel').scrollTop=$('#panel').scrollHeight;
 }
 function actionCard(a,i,j){
   const k=`data-i="${i}" data-j="${j}"`,v=a.input||{};
   if(a.name==='draft_email')return`<div class="acard"><div class="ah">✉️ Email draft</div>${v.to?`<div class="small"><b>To:</b> ${esc(v.to)}</div>`:''}${v.cc?`<div class="small"><b>Cc:</b> ${esc(v.cc)}</div>`:''}<div class="small"><b>Subject:</b> ${esc(v.subject)}</div><pre class="mail">${esc(v.body)}</pre><div class="btns"><button class="btn sm pri" data-act="ai-copy" ${k}>Copy</button><button class="btn sm" data-act="ai-mail" ${k}>Open in email app</button></div></div>`;
-  if(a.name==='prepare_dpr')return`<div class="acard"><div class="ah">📋 DPR ready · ${esc(fmtDate(v.date))}</div><div class="small mute">${(v.work||[]).length} activities · ${(v.manpower||[]).reduce((s,m)=>s+(Number(m.count)||0),0)} manpower${v.remarks?' · remarks':''}</div><div class="btns"><button class="btn sm pri" data-act="ai-dpr" ${k}>Review & save</button></div></div>`;
+  if(a.name==='prepare_dpr'){const t=totals(preFromAI(v));return`<div class="acard"><div class="ah">📋 DPR ready · ${esc(fmtDate(v.date))}</div><div class="small mute">Staff ${t.st} · Labour ${t.lb} · Sub-con ${t.sb} · <b>Total ${t.all}</b> · Equipment ${t.eq} · ${(v.tasks||[]).length} tasks</div><div class="btns"><button class="btn sm pri" data-act="ai-dpr" ${k}>Review & save</button></div></div>`}
   if(a.name==='prepare_document')return`<div class="acard"><div class="ah">📄 New ${esc(v.category||'document')}</div><div class="small"><b>${esc(v.title)}</b>${v.amount!=null?' · '+money(v.amount):''}${v.status?' · '+esc(v.status):''}</div><div class="btns"><button class="btn sm pri" data-act="ai-doc" ${k}>Review & save</button></div></div>`;
   if(a.name==='update_document'){const d=docs.find(x=>x.id===v.document_id);return`<div class="acard"><div class="ah">🔄 Update ${esc(d?.title||'document')}</div><div class="small">${v.status?`Status → <b>${esc(v.status)}</b> `:''}${v.with_party?`· With → <b>${esc(v.with_party)}</b> `:''}${v.due?`· Due → <b>${esc(fmtDate(v.due))}</b>`:''}${v.note?`<br><span class="mute">${esc(v.note)}</span>`:''}</div><div class="btns">${a.done?'<span class="stamp c-green">Applied</span>':`<button class="btn sm pri" data-act="ai-upd" ${k}>Apply</button>`}</div></div>`}
   return'';
 }
 async function aiSend(text){
-  if(aiBusy)return;chat.push({role:'user',text});aiBusy=true;const inp=$('#aiIn');if(inp)inp.value='';drawChat();
-  const messages=chat.slice(-16).map(m=>({role:m.role==='user'?'user':'assistant',content:m.role==='user'?m.text:((m.text||'')+(m.actions?.length?`\n[I prepared: ${m.actions.map(a=>a.name+' '+JSON.stringify(a.input).slice(0,300)).join('; ')}]`:''))||'(done)'}));
+  if(aiBusy)return;const files=chatFiles;chatFiles=[];drawAiFiles();
+  const um={role:'user',text,fnames:files.map(f=>f.name)};chat.push(um);aiBusy=true;const inp=$('#aiIn');if(inp)inp.value='';drawChat();
+  if(files.length){try{um.parts=await fileParts(files)}catch(e){aiBusy=false;chat.push({role:'assistant',text:'⚠️ '+e.message});drawChat();return}}
+  const messages=chat.slice(-16).map(m=>({role:m.role==='user'?'user':'assistant',content:m.role==='user'?(m===um&&m.parts?[...m.parts,{type:'text',text:m.text}]:m.text+(m.fnames?.length?` [attached: ${m.fnames.join(', ')}]`:'')):((m.text||'')+(m.actions?.length?`\n[I prepared: ${m.actions.map(a=>a.name+' '+JSON.stringify(a.input).slice(0,300)).join('; ')}]`:''))||'(done)'}));
   try{
-    const r=await callAI({system:aiSystem(),messages,tools:AI_TOOLS,max_tokens:3000});
+    const r=await callAI({system:aiSystem(),messages,tools:AI_TOOLS,max_tokens:6000});
     const blocks=r.content||[];
     chat.push({role:'assistant',text:blocks.filter(b=>b.type==='text').map(b=>b.text).join('\n').trim(),actions:blocks.filter(b=>b.type==='tool_use').map(b=>({name:b.name,input:b.input}))});
   }catch(e){chat.push({role:'assistant',text:'⚠️ '+(e.message||'AI error')+(String(e.message).match(/not found|404|FunctionsFetchError|Failed to send/i)?'\n\nThe AI function isn\'t set up in Supabase yet. Follow the AI setup steps.':'')})}
@@ -617,7 +724,7 @@ function aiAct(t){
   const a=chat[+t.dataset.i]?.actions?.[+t.dataset.j];if(!a)return;const v=a.input||{},act=t.dataset.act;
   if(act==='ai-copy'){const txt=(v.to?`To: ${v.to}\n`:'')+(v.cc?`Cc: ${v.cc}\n`:'')+`Subject: ${v.subject}\n\n${v.body}`;navigator.clipboard.writeText(txt).then(()=>toast('Email copied'),()=>toast('Copy failed, select the text and copy'))}
   else if(act==='ai-mail'){location.href=`mailto:${encodeURIComponent(v.to||'')}?subject=${encodeURIComponent(v.subject||'')}${v.cc?'&cc='+encodeURIComponent(v.cc):''}&body=${encodeURIComponent(v.body||'')}`}
-  else if(act==='ai-dpr'){if(dprMissing)return toast('Run the DPR setup script first');dprForm(null,{date:v.date||today(),project:projects.some(p=>p.id===v.project_id)?v.project_id:'',weather:WEATHER.includes(v.weather)?v.weather:'',work:(v.work||[]).map(w=>({activity:w.activity||'',location:w.location||'',qty:w.qty??'',unit:w.unit||''})),manpower:(v.manpower||[]).map(m=>({trade:m.trade,count:m.count})),equipment:v.equipment||'',remarks:v.remarks||'',photos:[]})}
+  else if(act==='ai-dpr'){if(dprMissing)return toast('Run the DPR setup script first');dprForm(null,preFromAI(v))}
   else if(act==='ai-doc'){docForm(null,{category:CATS.includes(v.category)?v.category:'Other',project:projects.some(p=>p.id===v.project_id)?v.project_id:'',title:v.title||'',ref:v.ref||'',party:v.party||'',amount:v.amount??'',status:STATUSES.includes(v.status)?v.status:'Draft',withp:WITH.includes(v.with_party)?v.with_party:'Me',submitted:v.submitted||'',due:v.due||'',notes:v.notes||'',link:'',files:[],history:[]})}
   else if(act==='ai-upd')applyUpdate(a,t);
 }
@@ -747,8 +854,9 @@ document.addEventListener('click',async e=>{
   else if(a==='go'){Object.assign(F,{q:'',cat:'All',proj:'',withp:'',status:{open:'_open',late:'_late',pend:'_pend',paid:'Paid'}[t.dataset.f]});go('register')}
   else if(a==='proj-open'){Object.assign(F,{q:'',cat:'All',status:'',withp:'',proj:id});go('register')}
   else if(a==='ai'){if(loaded)aiOpen()}
-  else if(a==='ai-clear'){chat=[];drawChat()}
-  else if(a==='ai-sugg'){const t2=t.dataset.t;if(t2.endsWith(': ')){$('#aiIn').value=t2;$('#aiIn').focus()}else aiSend(t2)}
+  else if(a==='ai-clear'){chat=[];chatFiles=[];drawAiFiles();drawChat()}
+  else if(a==='ai-rmfile'){chatFiles.splice(+t.dataset.i,1);drawAiFiles()}
+  else if(a==='ai-sugg'){const t2=t.dataset.t;if(t2.startsWith('📎')){$('#aiFile').click();return}if(t2.endsWith(': ')){$('#aiIn').value=t2;$('#aiIn').focus()}else aiSend(t2)}
   else if(['ai-copy','ai-mail','ai-dpr','ai-doc','ai-upd'].includes(a))aiAct(t);
   else if(a==='ai-sort'){if(loaded)sortOpen()}
   else if(a==='sort-rm'){sortItems.splice(+t.dataset.i,1);drawSort()}
@@ -767,10 +875,10 @@ document.addEventListener('click',async e=>{
   else if(a==='dpr-new'){if(loaded&&!dprMissing)dprForm(null);else if(dprMissing)go('dpr')}
   else if(a==='dpr-open')dprDetail(id);
   else if(a==='dpr-edit')dprForm(id);
-  else if(a==='dpr-addwork'){$('#workRows').insertAdjacentHTML('beforeend',workRow({}));$('#workRows .wrow:last-child input').focus()}
-  else if(a==='dpr-addman'){$('#manRows').insertAdjacentHTML('beforeend',manRow({}));$('#manRows .mrow:last-child input').focus()}
+  else if(a==='dpr-add'){const l=t.dataset.l,box=document.querySelector(`[data-list="${l}"]`);box.insertAdjacentHTML('beforeend',l==='materials'?mrow({}):l==='tasks'?trow({}):qrow({},l));box.lastElementChild.querySelector('input').focus()}
   else if(a==='dpr-rmrow'){t.parentElement.remove();menTotal()}
-  else if(a==='dpr-copyman'){const last=[...dprs].sort((x,y)=>(y.date||'').localeCompare(x.date||''))[0];if(last?.manpower?.length){$('#manRows').innerHTML=last.manpower.map(manRow).join('');menTotal();toast('Copied manpower from '+fmtDate(last.date))}}
+  else if(a==='dpr-print'){const rep=$('#rep');if(!rep)return;const pa=document.createElement('div');pa.id='printArea';pa.innerHTML=rep.outerHTML;document.body.appendChild(pa);document.body.classList.add('printing');setTimeout(()=>{window.print();setTimeout(()=>{document.body.classList.remove('printing');pa.remove()},500)},400)}
+  else if(a==='dpr-copyman'){const L=lastDpr($('#dprForm').elements.project.value);if(!L)return;const d=normDpr(L);['staff','labour','subs','others','equipment'].forEach(k=>{const box=document.querySelector(`[data-list="${k}"]`);box.querySelectorAll('.qrow').forEach(row=>{const n=row.querySelector('[data-k=name]').value.trim().toLowerCase(),m=d[k].find(x=>String(x.name).toLowerCase()===n);if(m)row.querySelector('[data-k=qty]').value=m.qty??''})});menTotal();toast('Copied numbers from '+fmtDate(L.date))}
   else if(a==='dpr-rmkept'){dprPhotosRemoved.push(...dprPhotosKept.splice(+t.dataset.i,1));drawPhotos()}
   else if(a==='dpr-rmnew'){dprPhotosNew.splice(+t.dataset.i,1);drawPhotos()}
   else if(a==='dpr-del'){$('#delBox').innerHTML=`<div class="card" style="margin-top:12px"><p style="margin:0 0 10px">Delete this daily report and its photos? This can't be undone.</p><div class="btns"><button class="btn danger" data-act="dpr-delyes" data-id="${esc(id)}">Yes, delete</button><button class="btn" data-act="delno">Keep it</button></div></div>`}
