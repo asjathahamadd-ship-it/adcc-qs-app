@@ -7,6 +7,8 @@ const cors = {
 };
 const json = (b: unknown, status = 200) =>
   new Response(JSON.stringify(b), { status, headers: { ...cors, "content-type": "application/json" } });
+const PUBLIC_KEY = "sb_publishable_lQvZkU-cNR2DyqF7uAbBzA_JMpW1KBq"; // public app key (safe to share)
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "https://lfyivbmwdgovvmbkxnqv.supabase.co";
 const MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash"];
 
 // deno-lint-ignore no-explicit-any
@@ -18,8 +20,8 @@ Deno.serve(async (req) => {
   try {
     const key = Deno.env.get("GEMINI_API_KEY");
     if (!key) return json({ error: { message: "GEMINI_API_KEY is not set in Supabase Edge Function secrets." } }, 500);
-    const u = await fetch(`${Deno.env.get("SUPABASE_URL")}/auth/v1/user`, {
-      headers: { authorization: req.headers.get("authorization") || "", apikey: Deno.env.get("SUPABASE_ANON_KEY") || "" },
+    const u = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
+      headers: { authorization: req.headers.get("authorization") || "", apikey: req.headers.get("apikey") || Deno.env.get("SUPABASE_ANON_KEY") || Deno.env.get("SUPABASE_PUBLISHABLE_KEY") || PUBLIC_KEY },
     });
     if (!u.ok) return json({ error: { message: "Please log in again." } }, 401);
 
