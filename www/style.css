@@ -252,3 +252,6 @@ pre.mail{white-space:pre-wrap;font:14px/1.5 Inter,system-ui,sans-serif;backgroun
 body.printing #printArea{position:absolute;left:0;top:0;width:100%;z-index:999;background:#fff}
 
 .fimg{display:flex;align-items:center;gap:10px}.fimg img{width:56px;height:42px;object-fit:cover;border-radius:6px;flex:none}
+
+.dprlinks{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 12px}
+.dprlinks .btn{white-space:normal;text-align:left;max-width:100%;overflow-wrap:anywhere;height:auto;padding:8px 12px}

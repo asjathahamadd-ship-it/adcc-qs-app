@@ -15,7 +15,7 @@ const WITH=['Me','Site team','Project manager','Consultant / Engineer','Client',
 const ST={Draft:'grey',Submitted:'blue','Under review':'amber','Revise & resubmit':'red',Approved:'green',Certified:'green',Invoiced:'violet',Paid:'green',Closed:'grey',Rejected:'red'};
 
 let user=null,loaded=false,docs=[],projects=[],settings={},logoUrl='',dprs=[],dprMissing=false;
-const F2={proj:''};let pphotos=[],ppMissing=false,ppProj='',ppNew=[],ppKept=[],ppRemoved=[],editingPP=null,lbList=[],lbIdx=0;const urlCache={};let dprPhotosNew=[],dprPhotosKept=[],dprPhotosRemoved=[],editingDpr=null;
+const F2={proj:''};let dprSrcNew=[],dprSrcKept=[],dprSrcRemoved=[];let pphotos=[],ppMissing=false,ppProj='',ppNew=[],ppKept=[],ppRemoved=[],editingPP=null,lbList=[],lbIdx=0;const urlCache={};let dprPhotosNew=[],dprPhotosKept=[],dprPhotosRemoved=[],editingDpr=null;
 const F={q:'',cat:'All',proj:'',status:'',withp:'',sort:'updated'};
 let view='home',pendingFiles=[],keptFiles=[],removedFiles=[],editingId=null,busy=false,signup=false;
 
@@ -362,7 +362,7 @@ function dprView(){
   <div class="list">${list.map(r=>{const d=normDpr(r),t=totals(d),p=projName(r.project);return`<button class="row" data-act="dpr-open" data-id="${esc(r.id)}">
     <span class="head"><span class="stamp c-blue">${esc(fmtDate(r.date))}</span>${d.ref_no?`<span class="cat">${esc(d.ref_no)}</span>`:''}${p?`<span class="cat">${esc(p)}</span>`:''}</span>
     <span class="t">${d.tasks.length?esc(d.tasks.slice(0,2).map(x=>x.description).join(', '))+(d.tasks.length>2?` +${d.tasks.length-2} more`:''):'No tasks recorded'}</span><span class="amt">${t.all} men</span>
-    <span class="m"><span>Staff ${t.st}</span><span>Labour ${t.lb}</span><span>Sub-con ${t.sb}</span><span>Equip ${t.eq}</span>${r.photos.length?`<span>${r.photos.length} photos</span>`:''}</span></button>`}).join('')||`<div class="empty"><p>No daily reports yet.</p><button class="btn pri" data-act="dpr-new">+ New DPR</button></div>`}</div>`;
+    <span class="m"><span>Staff ${t.st}</span><span>Labour ${t.lb}</span><span>Sub-con ${t.sb}</span><span>Equip ${t.eq}</span>${r.photos.length?`<span>🖼 ${r.photos.length} photos</span>`:''}${(d.files||[]).length?'<span>📄 original file</span>':''}</span></button>`}).join('')||`<div class="empty"><p>No daily reports yet.</p><button class="btn pri" data-act="dpr-new">+ New DPR</button></div>`}</div>`;
 }
 function dprDetail(id){
   const r=dprs.find(x=>x.id===id);if(!r)return closeSheet();
@@ -371,6 +371,7 @@ function dprDetail(id){
   const tot=(l,v)=>`<div class="rtot"><span>${esc(l)}</span><b>${v}</b></div>`;
   openSheet(`<div class="ph noprint"><div><div class="cat">Daily progress report</div><h2>${esc(fmtDate(r.date))}</h2></div><button class="x" data-act="close" aria-label="Close">×</button></div>
   <div class="btns noprint" style="margin-bottom:12px"><button class="btn sm" data-act="dpr-edit" data-id="${esc(r.id)}">Edit</button>${window.Capacitor?'':'<button class="btn sm" data-act="dpr-print">🖨 Print / Save PDF</button>'}<button class="btn sm danger" data-act="dpr-del" data-id="${esc(r.id)}">Delete</button></div><div id="delBox" class="noprint"></div>
+  ${(d.files||[]).length||r.photos.length?`<div class="dprlinks noprint">${(d.files||[]).map(f=>`<button class="btn sm" data-act="file" data-p="${esc(f.path)}">📄 Open original DPR: ${esc(f.name)}</button>`).join('')}${r.photos.length?`<button class="btn sm" data-act="lb" data-list="dpr:${esc(r.id)}" data-i="0">🖼 View ${r.photos.length} progress photos</button>`:''}</div>`:''}
   <div class="rep" id="rep">
    <div class="rhead"><span class="rlogo"><img src="${esc(logoUrl||LOGO)}" alt="ADCC"></span><div><div class="rtitle">DAILY PROGRESS REPORT</div><div class="rsub">${esc(d.location||P||'')}</div></div></div>
    <div class="rinfo"><div><small>Employer</small><b>${esc(d.employer||'—')}</b></div><div><small>Consultant</small><b>${esc(d.consultant||'—')}</b></div><div><small>Contractor</small><b>${esc(d.contractor||'—')}</b></div><div><small>Ref. no.</small><b>${esc(d.ref_no||'—')}</b></div><div><small>Date</small><b>${esc(fmtDate(r.date))}</b></div></div>
@@ -403,7 +404,7 @@ function dprForm(id,pre){
   const r=id?dprs.find(x=>x.id===id):null;editingDpr=id||null;
   const d=r?normDpr(r):(pre||blankDpr(F2.proj));
   const date=r?.date||pre?.date||today(),proj=r?.project||pre?.project||F2.proj||(projects.length===1?projects[0].id:'');
-  if(!pre||!pre._keepPhotos){dprPhotosNew=[];dprPhotosKept=[...(r?.photos||[])];dprPhotosRemoved=[]}
+  if(!pre||!pre._keepPhotos){dprPhotosNew=[];dprPhotosKept=[...(r?.photos||[])];dprPhotosRemoved=[];dprSrcNew=[];dprSrcKept=[...(d.files||[])]}
   const sec=([k,title,totLabel])=>`<fieldset class="dsec"><legend>${esc(title)}<span class="tot" data-tot="${k}"></span></legend><div class="qlist" data-list="${k}">${(d[k]||[]).map(x=>qrow(x,k)).join('')}</div><button type="button" class="btn sm" data-act="dpr-add" data-l="${k}">+ Add</button></fieldset>`;
   openSheet(`<div class="ph"><h2>${id?'Edit DPR':(pre&&!pre._blank?'New DPR (filled by AI)':'New daily progress report')}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
   <div class="aifill"><div><b>✨ Fill from a DPR file</b><div class="small mute">Upload a DPR PDF or photo. AI reads every count: staff, labour, sub-contractors, equipment, tasks.</div></div><label class="btn sm pri">Upload PDF / photo<input id="dprAiIn" type="file" accept="application/pdf,image/*" multiple hidden></label></div>
@@ -427,6 +428,7 @@ function dprForm(id,pre){
    <label class="full">Remarks / delays / issues<textarea name="remarks" style="min-height:60px">${esc(d.remarks||'')}</textarea></label>
    <label>Submitted by<input name="submitted_by" value="${esc(d.submitted_by||'')}" placeholder="Name (designation)"></label>
    <label>Reviewed by<input name="reviewed_by" value="${esc(d.reviewed_by||'')}" placeholder="Name (designation)"></label>
+   <div class="full" id="srcWrap"></div>
    <div class="full"><b class="small">Site photographs</b><ul class="files" id="photoList" style="margin:6px 0"></ul>
     <div class="btns"><label class="btn sm">📷 Take photo<input id="photoCam" type="file" accept="image/*" capture="environment" hidden></label><label class="btn sm">Add photos<input id="photoIn" type="file" accept="image/*" multiple hidden></label>${!id&&dprs.length?'<button type="button" class="btn sm" data-act="dpr-copyman">Copy numbers from last DPR</button>':''}</div></div>
    <p id="formMsg" class="full small late" role="alert"></p>
@@ -454,7 +456,9 @@ function menTotal(){
   QLISTS.forEach(([k])=>{const el=document.querySelector(`[data-tot="${k}"]`);if(el)el.textContent=' · '+s(k)});
   $('#grand').innerHTML=`<span>Total manpower on site today<br><small>Staff ${st} + Labour ${lb} + Sub-contractors ${sb}</small></span><b>${st+lb+sb}</b>`;
 }
+function drawSrc(){const w=$('#srcWrap');if(!w)return;const all=[...dprSrcKept.map((f,i)=>({n:f.name,k:'k',i})),...dprSrcNew.map((f,i)=>({n:f.name,k:'n',i}))];w.innerHTML=all.length?`<b class="small">Original DPR file (saved with this DPR)</b><ul class="files" style="margin:6px 0">${all.map(x=>`<li><span>📄 ${esc(x.n)}${x.k==='n'?' <span class="mute">(new)</span>':''}</span><button type="button" class="link" data-act="dpr-rmsrc" data-k="${x.k}" data-i="${x.i}">Remove</button></li>`).join('')}</ul>`:''}
 function drawPhotos(){
+  drawSrc();
   const l=$('#photoList');if(!l)return;
   l.innerHTML=dprPhotosKept.map((f,i)=>`<li><span>${esc(f.name)}</span><button type="button" class="link" data-act="dpr-rmkept" data-i="${i}">Remove</button></li>`).join('')+
    dprPhotosNew.map((f,i)=>`<li><span class="fimg"><img src="${URL.createObjectURL(f)}" alt="">${esc(f.name)} <span class="mute">(new)</span></span><button type="button" class="link" data-act="dpr-rmnew" data-i="${i}">Remove</button></li>`).join('');
@@ -470,13 +474,14 @@ async function saveDpr(e){
     for(let i=0;i<dprPhotosNew.length;i++){btn.textContent=`Uploading photo ${i+1} of ${dprPhotosNew.length}…`;
       const ff=await compress(dprPhotosNew[i]);
       try{const path=await upload(ff);uploaded.push(path);photos.push({path,name:ff.name,size:ff.size})}catch(err){err.upload=dprPhotosNew[i].name;throw err}}
+    const srcFiles=[...dprSrcKept];for(let i=0;i<dprSrcNew.length;i++){btn.textContent='Uploading original DPR file…';const f=dprSrcNew[i];try{const path=await upload(f);uploaded.push(path);srcFiles.push({path,name:f.name,size:f.size})}catch(err){err.upload=f.name;throw err}}
     btn.textContent='Saving…';
     const row={project_id:proj||null,report_date:date,weather:d.weather.cond,
       work:d.tasks.map(x=>({activity:x.description,location:'',qty:x.qty,unit:''})),manpower:[...d.staff,...d.labour,...d.subs,...d.others].filter(x=>num(x.qty)).map(x=>({trade:x.name,count:num(x.qty)})),
-      equipment:d.equipment.filter(x=>num(x.qty)).map(x=>`${x.qty} ${x.name}`).join(', '),remarks:d.remarks,photos,details:{...d,total:t.all},updated_at:new Date().toISOString()};
+      equipment:d.equipment.filter(x=>num(x.qty)).map(x=>`${x.qty} ${x.name}`).join(', '),remarks:d.remarks,photos,details:{...d,files:srcFiles,total:t.all},updated_at:new Date().toISOString()};
     const {error}=editingDpr?await sb.from('dprs').update(row).eq('id',editingDpr):await sb.from('dprs').insert(row);
     if(error){if(/details/i.test(error.message||''))error.message='Run the new DPR setup script in Supabase (adds the "details" column).';throw error}
-    await removeFiles(dprPhotosRemoved.map(f=>f.path));
+    await removeFiles([...dprPhotosRemoved,...(dprSrcRemoved||[])].map(f=>f.path));dprSrcRemoved=[];
     busy=false;closeSheet();toast('DPR saved');refresh(true);
   }catch(err){
     busy=false;btn.disabled=false;btn.textContent=editingDpr?'Save changes':'Save DPR';
@@ -549,8 +554,8 @@ async function aiFillDpr(files){
     const content=[...await fileParts(files),{type:'text',text:'This is a daily progress report (DPR) from a UAE construction site. Read it carefully and extract EVERY row with its exact quantity: staff/designation, labour/tradesmen, sub-contractors, other sub-contractors/operators, plant & equipment, weather (condition and min/max temp), materials delivered, the description of today\'s tasks, header fields (employer, consultant, contractor, ref no, date, plot/location), submitted by and reviewed by. Rows with blank quantity = 0. Keep row names exactly as written. Today is '+today()+'.'}];
     const r=await callAI({max_tokens:6000,system:'You extract construction daily progress report data accurately. Never invent numbers. Projects in the app: '+JSON.stringify(projects.map(p=>({id:p.id,name:p.name}))),messages:[{role:'user',content}],tools:[{name:'fill_dpr',description:'Return the full DPR data',input_schema:DPR_SCHEMA}],tool_choice:{type:'tool',name:'fill_dpr'}});
     const v=(r.content||[]).find(b=>b.type==='tool_use')?.input;if(!v)throw new Error('AI could not read this file. Try a clearer PDF or photo.');
-    const keepNew=dprPhotosNew,keepKept=dprPhotosKept,keepRem=dprPhotosRemoved,eid=editingDpr;
-    const pre=preFromAI(v);pre._keepPhotos=true;dprPhotosNew=keepNew;dprPhotosKept=keepKept;dprPhotosRemoved=keepRem;
+    const keepNew=dprPhotosNew,keepKept=dprPhotosKept,keepRem=dprPhotosRemoved,eid=editingDpr,keepSrcK=dprSrcKept;
+    const pre=preFromAI(v);pre._keepPhotos=true;dprPhotosNew=keepNew;dprPhotosKept=keepKept;dprPhotosRemoved=keepRem;dprSrcKept=keepSrcK;dprSrcNew=files.filter(f=>f.size<=20*1048576);
     if(eid){dprForm(null,pre);editingDpr=eid;$('#saveBtn').textContent='Save changes'}else dprForm(null,pre);
     const t=totals(pre);toast(`AI filled the DPR: ${t.all} total manpower. Now taking out the site photos…`);
     const box2=document.querySelector('.aifill .small');if(box2)box2.textContent='✓ Filled. Now taking out the site photos from your file…';
@@ -912,13 +917,14 @@ document.addEventListener('click',async e=>{
   else if(a==='dpr-open')dprDetail(id);
   else if(a==='dpr-edit')dprForm(id);
   else if(a==='dpr-add'){const l=t.dataset.l,box=document.querySelector(`[data-list="${l}"]`);box.insertAdjacentHTML('beforeend',l==='materials'?mrow({}):l==='tasks'?trow({}):qrow({},l));box.lastElementChild.querySelector('input').focus()}
+  else if(a==='dpr-rmsrc'){if(t.dataset.k==='k')dprSrcRemoved.push(...dprSrcKept.splice(+t.dataset.i,1));else dprSrcNew.splice(+t.dataset.i,1);drawSrc()}
   else if(a==='dpr-rmrow'){t.parentElement.remove();menTotal()}
   else if(a==='dpr-print'){const rep=$('#rep');if(!rep)return;const pa=document.createElement('div');pa.id='printArea';pa.innerHTML=rep.outerHTML;document.body.appendChild(pa);document.body.classList.add('printing');setTimeout(()=>{window.print();setTimeout(()=>{document.body.classList.remove('printing');pa.remove()},500)},400)}
   else if(a==='dpr-copyman'){const L=lastDpr($('#dprForm').elements.project.value);if(!L)return;const d=normDpr(L);['staff','labour','subs','others','equipment'].forEach(k=>{const box=document.querySelector(`[data-list="${k}"]`);box.querySelectorAll('.qrow').forEach(row=>{const n=row.querySelector('[data-k=name]').value.trim().toLowerCase(),m=d[k].find(x=>String(x.name).toLowerCase()===n);if(m)row.querySelector('[data-k=qty]').value=m.qty??''})});menTotal();toast('Copied numbers from '+fmtDate(L.date))}
   else if(a==='dpr-rmkept'){dprPhotosRemoved.push(...dprPhotosKept.splice(+t.dataset.i,1));drawPhotos()}
   else if(a==='dpr-rmnew'){dprPhotosNew.splice(+t.dataset.i,1);drawPhotos()}
   else if(a==='dpr-del'){$('#delBox').innerHTML=`<div class="card" style="margin-top:12px"><p style="margin:0 0 10px">Delete this daily report and its photos? This can't be undone.</p><div class="btns"><button class="btn danger" data-act="dpr-delyes" data-id="${esc(id)}">Yes, delete</button><button class="btn" data-act="delno">Keep it</button></div></div>`}
-  else if(a==='dpr-delyes'){const r=dprs.find(x=>x.id===id);const {error}=await sb.from('dprs').delete().eq('id',id);if(error)return toast(errMsg(error));await removeFiles((r?.photos||[]).map(f=>f.path));closeSheet();toast('Deleted');refresh(true)}
+  else if(a==='dpr-delyes'){const r=dprs.find(x=>x.id===id);const {error}=await sb.from('dprs').delete().eq('id',id);if(error)return toast(errMsg(error));await removeFiles([...(r?.photos||[]),...((r?.details||{}).files||[])].map(f=>f.path));closeSheet();toast('Deleted');refresh(true)}
   else if(a==='proj-add')projForm(null);
   else if(a==='proj-edit')projForm(id);
   else if(a==='proj-del'){const {error}=await sb.from('projects').delete().eq('id',id);if(error)return toast(errMsg(error));closeSheet();toast('Project deleted');refresh(true)}
