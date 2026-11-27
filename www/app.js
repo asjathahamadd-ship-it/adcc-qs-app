@@ -39,7 +39,8 @@ const safeUrl=u=>/^https?:\/\//i.test(u||'')?u:'';
 const uuid=()=>(crypto.randomUUID?crypto.randomUUID():Date.now().toString(36)+Math.random().toString(36).slice(2));
 const username=()=>(user?.email||'').split('@')[0];
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove('on'),3200)}
-function gate(m){$('#gateMsg').textContent=m;$('#gate').hidden=false}
+function gate(m){$('#gateMsg').textContent=m;const g=$('#gate');g.classList.remove('out');g.hidden=false}
+function hideGate(){const g=$('#gate');if(g.hidden)return;g.classList.add('out');setTimeout(()=>{g.hidden=true;g.classList.remove('out')},350)}
 function errMsg(e){const m=(e?.message||'').toLowerCase();if(m.includes('fetch')||m.includes('network'))return'No internet connection. Please try again.';if(m.includes('jwt')||m.includes('session'))return'Your login expired. Please log in again.';return'Couldn\'t save: '+(e?.message||'please try again')}
 function openUrl(url){const B=window.Capacitor?.Plugins?.Browser;if(B)B.open({url});else window.open(url,'_blank','noopener')}
 
@@ -63,7 +64,7 @@ async function load(){
   loaded=true;
 }
 async function refresh(silent){
-  try{await load();$('#gate').hidden=true;render()}
+  try{await load();hideGate();render()}
   catch(e){if(!loaded)gate('Couldn\'t load your register. '+errMsg(e)+' Pull down or reopen the app.');else if(!silent)toast(errMsg(e))}
 }
 async function upload(file){
@@ -84,7 +85,20 @@ function render(){
   const m=$('#main');
   m.innerHTML=view==='register'?registerView():view==='projects'?projectsView():view==='dpr'?dprView():view==='photos'?photosView():homeView();
   if(view==='photos')fillThumbs();
+  movePill();
+  if(animateNext){animateNext=false;m.classList.remove('enter');void m.offsetWidth;m.classList.add('enter');
+    let i=0;m.querySelectorAll('.top,h1,.eyebrow,.kpi,.card,.row,.stg,.filters,.search,.scroll,.empty,.proj>.card,.dprtoday').forEach(el=>{el.style.setProperty('--i',Math.min(i++,14))});
+    if(!REDUCED)m.querySelectorAll('[data-count]').forEach(countUp)}
 }
+const REDUCED=matchMedia('(prefers-reduced-motion: reduce)').matches;let animateNext=true;
+function countUp(el){const end=Number(el.dataset.count)||0,fmt=el.dataset.fmt,t0=performance.now(),dur=900;const f=v=>fmt==='aed'?short(v):String(Math.round(v));
+  const step=t=>{const k=Math.min(1,(t-t0)/dur),e=1-Math.pow(1-k,3);el.textContent=f(end*e);if(k<1)requestAnimationFrame(step)};el.textContent=f(0);requestAnimationFrame(step)}
+function movePill(){const nav=$('.tabs'),act=nav&&nav.querySelector('[data-v][aria-current]');let pill=$('#tabPill');if(!nav)return;
+  if(!pill){pill=document.createElement('span');pill.id='tabPill';pill.className='tabpill';nav.appendChild(pill)}
+  if(!act){pill.style.opacity=0;return}pill.style.opacity=1;
+  const desk=innerWidth>=900;if(desk){pill.style.transform=`translateY(${act.offsetTop}px)`;pill.style.height=act.offsetHeight+'px';pill.style.width='';}else{pill.style.transform=`translateX(${act.offsetLeft+act.offsetWidth/2-20}px)`;pill.style.height='';pill.style.width=''}}
+addEventListener('resize',()=>movePill());
+addEventListener('scroll',()=>document.body.classList.toggle('scrolled',scrollY>8),{passive:true});
 function homeView(){
   const d=new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long'});
   const hi=`<div class="top" style="margin-bottom:6px"><p class="eyebrow" style="margin:0">${d}</p><button class="refresh" data-act="refresh">↻ Refresh</button></div>`;
@@ -100,10 +114,10 @@ function homeView(){
   const recent=[...docs].sort((a,b)=>(b.updated||'').localeCompare(a.updated||'')).slice(0,5);
   return`${hi}<h1>Where everything is now</h1>${dprTodayCard()}
   <div class="kpis">
-   <button class="kpi" data-act="go" data-f="open"><b>${open.length}</b><small>Open documents</small></button>
-   <button class="kpi ${late.length?'alert':''}" data-act="go" data-f="late"><b>${late.length}</b><small>Overdue · ${soon.length} due this week</small></button>
-   <button class="kpi" data-act="go" data-f="pend"><b>${short(sum(pend))}</b><small>Awaiting payment · ${pend.length}</small></button>
-   <button class="kpi" data-act="go" data-f="paid"><b>${short(sum(paid))}</b><small>Paid · ${paid.length}</small></button>
+   <button class="kpi" data-act="go" data-f="open"><b data-count="${open.length}">${open.length}</b><small>Open documents</small></button>
+   <button class="kpi ${late.length?'alert':''}" data-act="go" data-f="late"><b data-count="${late.length}">${late.length}</b><small>Overdue · ${soon.length} due this week</small></button>
+   <button class="kpi" data-act="go" data-f="pend"><b data-count="${sum(pend)}" data-fmt="aed">${short(sum(pend))}</b><small>Awaiting payment · ${pend.length}</small></button>
+   <button class="kpi" data-act="go" data-f="paid"><b data-count="${sum(paid)}" data-fmt="aed">${short(sum(paid))}</b><small>Paid · ${paid.length}</small></button>
   </div>
   <div class="grid2">
    <section class="card"><h2>Currently with</h2>${byWith.length?`<div class="bars">${byWith.map(x=>`<button class="bar" data-act="with" data-w="${esc(x.w)}"><span class="lbl">${esc(x.w)}</span><i style="width:${x.n/max*100}%"></i><span class="n">${x.n}</span></button>`).join('')}</div>`:'<p class="mute">Nothing open. Everything is closed or paid.</p>'}</section>
@@ -162,8 +176,8 @@ function projectsView(){
 }
 
 /* ---------- sheets ---------- */
-function openSheet(html){$('#panel').innerHTML=html;$('#sheet').hidden=false;document.body.style.overflow='hidden';$('#panel').scrollTop=0}
-function closeSheet(){if(busy)return;$('#sheet').hidden=true;document.body.style.overflow='';editingId=null}
+let sheetT;function openSheet(html){clearTimeout(sheetT);const sh=$('#sheet');const was=!sh.hidden&&!sh.classList.contains('closing');sh.classList.remove('closing');$('#panel').innerHTML=html;sh.hidden=false;if(!was){sh.classList.remove('opening');void sh.offsetWidth;sh.classList.add('opening')}document.body.style.overflow='hidden';$('#panel').scrollTop=0}
+function closeSheet(){if(busy)return;const sh=$('#sheet');if(sh.hidden)return;editingId=null;document.body.style.overflow='';if(REDUCED){sh.hidden=true;return}sh.classList.add('closing');clearTimeout(sheetT);sheetT=setTimeout(()=>{sh.hidden=true;sh.classList.remove('closing','opening')},230)}
 function detail(id){
   const x=docs.find(d=>d.id===id);if(!x)return closeSheet();
   const link=safeUrl(x.link);
@@ -922,13 +936,13 @@ $('#loginForm').onsubmit=async e=>{
 };
 sb.auth.onAuthStateChange((ev,session)=>{
   const u=session?.user||null;
-  if(u&&(!user||user.id!==u.id)){user=u;$('#login').hidden=true;gate('Loading your register…');loaded=false;settings={};logoUrl='';refresh()}
+  if(u&&(!user||user.id!==u.id)){user=u;$('#login').hidden=true;animateNext=true;gate('Loading your register…');loaded=false;settings={};logoUrl='';refresh()}
   else if(!u&&ev!=='INITIAL_SESSION'||(!u&&!user)){user=null;docs=[];projects=[];loaded=false;closeSheet();showLogin()}
   else if(u)user=u;
 });
 
 /* ---------- events ---------- */
-function go(v){view=v;render();window.scrollTo(0,0)}
+function go(v){view=v;animateNext=true;render();window.scrollTo(0,0)}
 document.addEventListener('click',async e=>{
   const t=e.target.closest('[data-act]');if(!t)return;
   const a=t.dataset.act,id=t.dataset.id;
