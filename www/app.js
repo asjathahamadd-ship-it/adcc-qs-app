@@ -536,7 +536,7 @@ async function lbShow(){
 
 /* ---------- AI assistant (Gemini via Supabase function "ai") ---------- */
 let chat=[],aiBusy=false,sortItems=[];
-const AI_MODEL='claude-sonnet-5-5';
+const AI_MODEL='claude-sonnet-5-5';const AI_FN='smart-task';
 function nowText(){return new Date().toLocaleString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit',timeZone:'Asia/Dubai'})+' (Dubai time)'}
 function aiContext(){
   const P=id=>projName(id)||null;
@@ -571,7 +571,7 @@ const AI_TOOLS=[
  {name:'update_document',description:'Change the status, who currently has it, or due date of an existing register document. User confirms before it is saved.',input_schema:{type:'object',properties:{document_id:{type:'string'},status:{type:'string'},with_party:{type:'string'},due:{type:'string'},note:{type:'string',description:'Short history note'}},required:['document_id']}}
 ];
 async function callAI(body){
-  const {data,error}=await sb.functions.invoke('ai',{body:{model:AI_MODEL,...body}});
+  const {data,error}=await sb.functions.invoke(AI_FN,{body:{model:AI_MODEL,...body}});
   if(error){let m=error.message||'AI is not available.';try{const j=await error.context?.json?.();if(j?.error?.message)m=j.error.message}catch{}throw new Error(m)}
   if(data?.error)throw new Error(data.error.message||'AI error');
   return data;
