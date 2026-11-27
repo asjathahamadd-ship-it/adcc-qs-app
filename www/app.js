@@ -15,7 +15,7 @@ const WITH=['Me','Site team','Project manager','Consultant / Engineer','Client',
 const ST={Draft:'grey',Submitted:'blue','Under review':'amber','Revise & resubmit':'red',Approved:'green',Certified:'green',Invoiced:'violet',Paid:'green',Closed:'grey',Rejected:'red'};
 
 let user=null,loaded=false,docs=[],projects=[],settings={},logoUrl='',dprs=[],dprMissing=false;
-const F2={proj:''};let dprSrcNew=[],dprSrcKept=[],dprSrcRemoved=[];let pphotos=[],ppMissing=false,ppProj='',ppNew=[],ppKept=[],ppRemoved=[],editingPP=null,lbList=[],lbIdx=0;const urlCache={};let dprPhotosNew=[],dprPhotosKept=[],dprPhotosRemoved=[],editingDpr=null;
+const F2={proj:''};let dprSrcNew=[],dprSrcKept=[],dprSrcRemoved=[];let ppVoice=null,ppNoDetOk=false,recState=null,pphotos=[],ppMissing=false,ppProj='',ppNew=[],ppKept=[],ppRemoved=[],editingPP=null,lbList=[],lbIdx=0;const urlCache={};let dprPhotosNew=[],dprPhotosKept=[],dprPhotosRemoved=[],editingDpr=null;
 const F={q:'',cat:'All',proj:'',status:'',withp:'',sort:'updated'};
 let view='home',pendingFiles=[],keptFiles=[],removedFiles=[],editingId=null,busy=false,signup=false;
 
@@ -177,7 +177,7 @@ function projectsView(){
 
 /* ---------- sheets ---------- */
 let sheetT;function openSheet(html){clearTimeout(sheetT);const sh=$('#sheet');const was=!sh.hidden&&!sh.classList.contains('closing');sh.classList.remove('closing');$('#panel').innerHTML=html;sh.hidden=false;if(!was){sh.classList.remove('opening');void sh.offsetWidth;sh.classList.add('opening')}document.body.style.overflow='hidden';$('#panel').scrollTop=0}
-function closeSheet(){if(busy)return;const sh=$('#sheet');if(sh.hidden)return;editingId=null;document.body.style.overflow='';if(REDUCED){sh.hidden=true;return}sh.classList.add('closing');clearTimeout(sheetT);sheetT=setTimeout(()=>{sh.hidden=true;sh.classList.remove('closing','opening')},230)}
+function closeSheet(){if(busy)return;if(recState?.mr?.state==='recording'){recState.mr.onstop=null;recState.stream?.getTracks().forEach(t=>t.stop());try{recState.mr.stop()}catch{}clearInterval(recState.iv);recState=null}const sh=$('#sheet');if(sh.hidden)return;editingId=null;document.body.style.overflow='';if(REDUCED){sh.hidden=true;return}sh.classList.add('closing');clearTimeout(sheetT);sheetT=setTimeout(()=>{sh.hidden=true;sh.classList.remove('closing','opening')},230)}
 function detail(id){
   const x=docs.find(d=>d.id===id);if(!x)return closeSheet();
   const link=safeUrl(x.link);
@@ -590,7 +590,8 @@ async function fillThumbs(root){
   const m=await signed(els.map(e=>e.dataset.path));els.forEach(e=>{const u=m[e.dataset.path];if(u)e.src=u});
 }
 const isVid=f=>/^video\//.test(f.type||'')||/\.(mp4|mov|webm|3gp|m4v)$/i.test(f.name||f.path||'');
-const media=(f,src)=>isVid(f)?`<video ${src?`src="${src}"`:`data-path="${esc(f.path)}"`} muted playsinline preload="metadata"></video><span class="vbadge">▶</span>`:`<img ${src?`src="${src}"`:`data-path="${esc(f.path)}"`} alt="${esc(f.name||'')}" loading="lazy">`;
+const isAud=f=>/^audio\//.test(f.type||'')||/\.(wav|m4a|mp3|webm|ogg|aac|amr)$/i.test(f.name||f.path||'')&&!/^video\//.test(f.type||'');
+const media=(f,src)=>isAud(f)?`<span class="atile">🎤<small>Voice note</small></span>`:isVid(f)?`<video ${src?`src="${src}"`:`data-path="${esc(f.path)}"`} muted playsinline preload="metadata"></video><span class="vbadge">▶</span>`:`<img ${src?`src="${src}"`:`data-path="${esc(f.path)}"`} alt="${esc(f.name||'')}" loading="lazy">`;
 const thumb=(f,list,i)=>`<button type="button" class="pthumb rel" data-act="lb" data-list="${esc(list)}" data-i="${i}">${media(f)}</button>`;
 function stageList(){const extra=[...new Set(pphotos.map(x=>x.stage))].filter(s=>!STAGES.includes(s));return[...STAGES,...extra]}
 function photosView(){
@@ -601,7 +602,7 @@ function photosView(){
     const es=list.filter(x=>x.stage===st),ph=es.flatMap(x=>x.photos),last=es[0]?.date;
     return`<li class="stg ${es.length?'done':''}"><span class="dot">${i+1}</span><div class="sbody">
      <div class="shead"><button class="stitle" data-act="pp-stage" data-s="${esc(st)}">${esc(st)}</button>
-      ${es.length?`<span class="mute small">${ph.length} photo${ph.length===1?'':'s'} · ${fmtDate(last)}</span>`:''}
+      ${es.length?`<span class="mute small">${ph.length} item${ph.length===1?'':'s'} · ${fmtDate(last)}${es.some(x=>!x.note)?' · <span class="late">⚠️ no details</span>':''}</span>`:''}
       <button class="btn sm" data-act="pp-new" data-s="${esc(st)}">+ Photos</button></div>
      ${ph.length?`<div class="strip">${ph.slice(0,6).map((f,j)=>thumb(f,'stage:'+st,j)).join('')}${ph.length>6?`<button class="more" data-act="pp-stage" data-s="${esc(st)}">+${ph.length-6}</button>`:''}</div>`:''}
     </div></li>`}).join('');
@@ -616,7 +617,7 @@ function stageSheet(st){
   openSheet(`<div class="ph"><div><div class="cat">Progress photos${ppProj?' · '+esc(projName(ppProj)):''}</div><h2>${esc(st)}</h2></div><button class="x" data-act="close" aria-label="Close">×</button></div>
   <button class="btn pri" data-act="pp-new" data-s="${esc(st)}" style="margin-bottom:14px">+ Add photos / videos to this stage</button>
   ${es.length?es.map(x=>`<section class="ppentry"><div class="shead"><div><b>${esc(fmtDate(x.date))}</b>${x.location?` · ${esc(x.location)}`:''}${!ppProj&&projName(x.project)?`<div class="mute small">${esc(projName(x.project))}</div>`:''}</div><button class="link" data-act="pp-edit" data-id="${esc(x.id)}">Edit</button></div>
-   ${x.note?`<p style="margin:4px 0 8px;white-space:pre-wrap">${esc(x.note)}</p>`:''}<div class="pgrid">${x.photos.map((f,j)=>thumb(f,'entry:'+x.id,j)).join('')}</div></section>`).join(''):'<p class="mute">No photos for this stage yet.</p>'}`);
+   ${x.note?`<p style="margin:4px 0 8px;white-space:pre-wrap">${esc(x.note)}</p>`:`<p class="nodet">⚠️ No details added. <button class="link" data-act="pp-edit" data-id="${esc(x.id)}">Add voice details</button></p>`}<div class="pgrid">${x.photos.map((f,j)=>thumb(f,'entry:'+x.id,j)).join('')}</div></section>`).join(''):'<p class="mute">No photos for this stage yet.</p>'}`);
   fillThumbs($('#panel'));
 }
 async function compress(file){
@@ -639,8 +640,12 @@ function ppForm(id,stage){
    <div class="full"><b class="small">Photos & videos</b><div class="pgrid" id="ppGrid" style="margin:8px 0"></div>
     <div class="btns"><label class="btn sm">📷 Photo<input id="ppCam" type="file" accept="image/*" capture="environment" hidden></label><label class="btn sm">🎥 Video<input id="ppVid" type="file" accept="video/*" capture="environment" hidden></label><label class="btn sm">Choose from gallery<input id="ppIn" type="file" accept="image/*,video/*" multiple hidden></label></div>
     <p class="small mute" style="margin:6px 0 0">Videos up to 20 MB (about 20–40 seconds). Keep test videos short.</p></div>
-   <label class="full">Your readings / details (optional)<textarea name="readings" style="min-height:56px" placeholder="e.g. Grade C40, slump 110 mm, concrete temp 31°C, ambient 34°C, 6 cubes taken, pour 45 m³, inspected by consultant WIR-045"></textarea></label>
-   <div class="full aifill" id="ppAiBox"><div><b>✨ Engineering notes with AI</b><div class="small mute" id="ppAiMsg">AI looks at the photos/videos and your readings, then writes the technical notes: what is shown, the checks for this stage, your values against typical limits, and what to verify.</div></div><button type="button" class="btn sm pri" data-act="pp-ai">Write notes</button></div>
+   <div class="full voice" id="ppAiBox">
+    <div class="vhead"><b>🎤 Tell the details by voice</b><span class="small mute">Say where it is, what work, and all readings, e.g. <i>"Casting tie beams TB1 to TB6 ground floor, C40, slump 110, concrete temp 31, 6 cubes, inspected by consultant, WIR 45"</i></span></div>
+    <div class="vctl" id="vctl"></div>
+    <div class="small mute" id="ppAiMsg">After you stop recording, AI listens, looks at the photos and writes the engineering notes.</div>
+    <details class="vtype"><summary>Or type details instead</summary><textarea name="readings" style="min-height:56px;margin-top:6px" placeholder="e.g. Grade C40, slump 110 mm, concrete temp 31°C, 6 cubes, WIR-045"></textarea><button type="button" class="btn sm pri" data-act="pp-ai" style="margin-top:6px">✨ Write notes</button></details>
+   </div>
    <label class="full">Notes<textarea name="note" id="ppNote" style="min-height:120px" placeholder="Write your own notes, or tap ✨ Write notes">${esc(x?.note||'')}</textarea></label>
    <p id="formMsg" class="full small late" role="alert"></p>
    <div class="full btns"><button class="btn pri" type="submit" id="saveBtn">${x?'Save changes':'Save photos'}</button><button class="btn" type="button" data-act="close">Cancel</button>${x?`<button class="btn danger" type="button" data-act="pp-del" data-id="${esc(x.id)}">Delete</button>`:''}</div>
@@ -650,6 +655,7 @@ function ppForm(id,stage){
   const add=e=>{for(const f of e.target.files){const lim=isVid(f)?20:25;if(f.size>lim*1048576){toast(`${f.name} is too large (max ${lim} MB). Record a shorter video.`);continue}ppNew.push(f)}e.target.value='';drawPP()};
   $('#ppIn').onchange=add;$('#ppCam').onchange=add;$('#ppVid').onchange=add;
   $('#ppStage').onchange=e=>{$('#otherWrap').hidden=e.target.value!=='Other'};
+  ppVoice=null;ppNoDetOk=false;drawVoice();
   $('#ppForm').onsubmit=savePP;
 }
 function drawPP(){
@@ -663,13 +669,15 @@ async function savePP(e){
   const fd=new FormData(e.target),g=k=>(fd.get(k)||'').toString().trim(),msg=$('#formMsg');
   let stage=g('stage');if(stage==='Other')stage=g('other')||'Other';
   if(!stage){msg.textContent='Please choose a stage.';return}
-  if(!ppNew.length&&!ppKept.length){msg.textContent='Add at least one photo or video.';return}
+  if(!ppNew.length&&!ppKept.length&&!ppVoice){msg.textContent='Add at least one photo or video.';return}
+  if(!g('note')&&!ppVoice&&!ppKept.some(isAud)&&!ppNoDetOk){msg.innerHTML='⚠️ <b>No details added.</b> Tap 🎤 and say what this work is (location, readings, tests), or tap Save again to save without details.';ppNoDetOk=true;$('#ppAiBox').classList.add('nudge');$('#ppAiBox').scrollIntoView({behavior:'smooth',block:'center'});return}
   const btn=$('#saveBtn');busy=true;btn.disabled=true;msg.textContent='';
   const photos=[...ppKept],uploaded=[];
   try{
     for(let i=0;i<ppNew.length;i++){btn.textContent=`Uploading ${i+1} of ${ppNew.length}…`;
       const f=await compress(ppNew[i]);
       try{const path=await upload(f);uploaded.push(path);photos.push({path,name:f.name,size:f.size,type:f.type||''})}catch(err){err.upload=ppNew[i].name;throw err}}
+    if(ppVoice){btn.textContent='Uploading voice note…';const path=await upload(ppVoice);uploaded.push(path);photos.push({path,name:ppVoice.name,size:ppVoice.size,type:'audio/wav'})}
     btn.textContent='Saving…';
     const row={project_id:g('project')||null,stage,location:g('location'),taken_on:g('date')||today(),note:g('note'),photos,updated_at:new Date().toISOString()};
     const {error}=editingPP?await sb.from('progress_photos').update(row).eq('id',editingPP):await sb.from('progress_photos').insert(row);
@@ -681,6 +689,41 @@ async function savePP(e){
     if(!err.upload)await removeFiles(uploaded);
     msg.textContent=err.upload?`Couldn't upload ${err.upload}: ${err.message||'please try again'}`:errMsg(err);
   }
+}
+/* ---------- Voice recording ---------- */
+async function toWav(blob){
+  const AC=window.AudioContext||window.webkitAudioContext,ac=new AC();
+  const buf=await ac.decodeAudioData(await blob.arrayBuffer());ac.close&&ac.close();
+  const rate=16000,len=Math.max(1,Math.ceil(buf.duration*rate)),off=new OfflineAudioContext(1,len,rate),src=off.createBufferSource();src.buffer=buf;src.connect(off.destination);src.start();
+  const d=(await off.startRendering()).getChannelData(0),b=new ArrayBuffer(44+d.length*2),v=new DataView(b);
+  const w=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i))};
+  w(0,'RIFF');v.setUint32(4,36+d.length*2,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,rate,true);v.setUint32(28,rate*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,d.length*2,true);
+  for(let i=0;i<d.length;i++){const x=Math.max(-1,Math.min(1,d[i]));v.setInt16(44+i*2,x<0?x*0x8000:x*0x7fff,true)}
+  return new File([b],`voice-note-${today()}-${Date.now().toString().slice(-5)}.wav`,{type:'audio/wav'});
+}
+const fmtSec=s=>`${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
+function drawVoice(){
+  const c=$('#vctl');if(!c)return;
+  if(recState)c.innerHTML=`<button type="button" class="vbtn rec" data-act="v-stop"><span class="dot"></span>Stop</button><span class="vtime" id="vtime">0:00</span><span class="wave"><i></i><i></i><i></i><i></i><i></i></span>`;
+  else if(ppVoice)c.innerHTML=`<audio src="${URL.createObjectURL(ppVoice)}" controls></audio><button type="button" class="btn sm" data-act="v-start">🎤 Re-record</button><button type="button" class="btn sm" data-act="v-del">Delete</button><button type="button" class="btn sm pri" data-act="pp-ai">✨ Write notes again</button>`;
+  else c.innerHTML=`<button type="button" class="vbtn" data-act="v-start"><span class="mic">🎤</span>Tap to record</button><label class="btn sm vfile">Use phone recorder<input id="vFile" type="file" accept="audio/*" capture hidden></label>`;
+  const vf=$('#vFile');if(vf)vf.onchange=async e=>{const f=e.target.files[0];e.target.value='';if(f)await gotAudio(f)};
+}
+async function gotAudio(blob){
+  const msg=$('#ppAiMsg');
+  try{ppVoice=await toWav(blob)}catch{if(/wav|mpeg|mp3|ogg|aac|flac/i.test(blob.type||'')){ppVoice=new File([blob],blob.name||'voice-note',{type:blob.type})}else{if(msg)msg.textContent='⚠️ Could not read that recording. Try the 🎤 button instead.';return}}
+  if(ppVoice.size>12*1048576){ppVoice=null;if(msg)msg.textContent='⚠️ Voice note is too long. Keep it under about 3 minutes.';drawVoice();return}
+  drawVoice();ppAI();
+}
+async function startRec(){
+  const msg=$('#ppAiMsg');
+  if(!navigator.mediaDevices?.getUserMedia||!window.MediaRecorder){$('#vFile')?.click();return}
+  let stream;try{stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true}})}
+  catch(e){if(msg)msg.textContent='⚠️ Microphone not allowed. Allow the microphone for this app, or use "Use phone recorder".';$('#vFile')?.click();return}
+  const mr=new MediaRecorder(stream),chunks=[];mr.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+  mr.onstop=async()=>{stream.getTracks().forEach(t=>t.stop());clearInterval(recState?.iv);clearTimeout(recState?.to);recState=null;if(msg)msg.textContent='Processing your voice note…';await gotAudio(new Blob(chunks,{type:mr.mimeType||'audio/webm'}))};
+  const t0=Date.now();recState={mr,stream,iv:setInterval(()=>{const el=$('#vtime');if(el)el.textContent=fmtSec((Date.now()-t0)/1000)},250),to:setTimeout(()=>mr.state==='recording'&&mr.stop(),180000)};
+  mr.start();if(msg)msg.textContent='Recording… speak clearly. Tap Stop when finished (max 3 min).';drawVoice();
 }
 /* AI engineering notes for progress photos / videos */
 async function videoFrames(file,n=4){
@@ -694,11 +737,12 @@ async function videoFrames(file,n=4){
 async function ppAI(){
   const f=$('#ppForm'),box=$('#ppAiBox'),msg=$('#ppAiMsg');if(!f||box.classList.contains('busy'))return;
   const g=k=>(f.elements[k]?.value||'').trim();let stage=g('stage');if(stage==='Other')stage=g('other');
-  const items=[...ppNew.map(x=>({file:x})),...ppKept.map(x=>({kept:x}))].slice(0,6);
-  if(!items.length&&!g('readings')){msg.textContent='Add a photo, a video or your readings first.';return}
-  box.classList.add('busy');msg.textContent='AI is studying your photos/videos… (10–40 seconds)';
+  const items=[...ppNew.map(x=>({file:x})),...ppKept.filter(x=>!isAud(x)).map(x=>({kept:x}))].slice(0,6);
+  if(!items.length&&!g('readings')&&!ppVoice){msg.textContent='Add a photo, a video or your details first.';return}
+  box.classList.add('busy');msg.textContent=ppVoice?'AI is listening to your voice note and studying the photos… (10–40 seconds)':'AI is studying your photos/videos… (10–40 seconds)';
   try{
     const content=[];
+    if(ppVoice)content.push({type:'text',text:'VOICE NOTE from the site engineer. Listen carefully, transcribe it, and use EVERY detail (location, element, work, grade, slump, temperatures, cubes, tests, bar sizes, top/bottom bars, cover, inspections, WIR numbers, people):'},{type:'image',source:{type:'base64',media_type:'audio/wav',data:await toB64(ppVoice)}});
     for(const it of items){
       let file=it.file;
       if(!file&&it.kept){if(isVid(it.kept)){content.push({type:'text',text:`[Saved video: ${it.kept.name}]`});continue}const u=(await signed([it.kept.path]))[it.kept.path];if(!u)continue;const b=await (await fetch(u)).blob();file=new File([b],it.kept.name,{type:b.type||'image/jpeg'})}
@@ -707,14 +751,16 @@ async function ppAI(){
         else{content.push({type:'text',text:`Frames from video ${file.name}:`});for(const fr of await videoFrames(file))content.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:fr}})}
       }else content.push({type:'text',text:`Photo: ${file.name}`},{type:'image',source:{type:'base64',media_type:'image/jpeg',data:await smallB64(file,1400)}});
     }
-    content.push({type:'text',text:`Stage selected: ${stage||'(not chosen — suggest one)'}\nLocation / element: ${g('location')||'-'}\nDate: ${g('date')}\nProject: ${projName(g('project'))||'-'}\nUser readings / details: ${g('readings')||'(none)'}\nExisting notes: ${g('note')||'(none)'}\n\nWrite site engineering notes for these progress photos/videos.`});
+    content.push({type:'text',text:`Stage selected: ${stage||'(not chosen — suggest one)'}\nLocation / element: ${g('location')||'-'}\nDate: ${g('date')}\nProject: ${projName(g('project'))||'-'}\nUser typed details: ${g('readings')||'(none)'}\nVoice note attached: ${ppVoice?'yes':'no'}\nExisting notes: ${g('note')||'(none)'}\n\nWrite site engineering notes for these progress photos/videos.`});
     const sys=`You are a senior site engineer / QA-QC inspector on a building project in Dubai, UAE, writing progress-photo notes for the contractor's records (Al Adeeb Building Contracting LLC). Be technical, practical and honest.
 - Describe only what is actually visible; do not invent things you cannot see.
 - Use the user's readings exactly as given (temperatures, slump, grade, quantities, test results) and compare them with TYPICAL requirements, e.g. for UAE hot-weather concreting (concrete temperature at placement commonly limited to about 32 °C unless the project spec says otherwise), slump vs the approved mix design, cube sampling and 7/28-day strength vs the specified grade; for reinforcement: bar sizes, spacing, top/bottom bar placement, laps and staggering, cover and spacer blocks, chairs, tying, couplers; for formwork, waterproofing, blockwork, etc. use the relevant checks.
 - Always say limits are typical and must be confirmed against the project specification / approved method statement / consultant's requirements.
 - Flag anything that looks wrong or needs attention.
+- If there is a voice note, the transcript and the details from it are the most important input. Put the details in the right place (location, readings, checks).
+- If the engineer gave NO details (no voice note, no typed details), say so in attention: "No details provided by the engineer — add location, readings and tests."
 - Use the allowed stage list: ${JSON.stringify([...STAGES])}.`;
-    const r=await callAI({max_tokens:4000,system:sys,messages:[{role:'user',content}],tools:[{name:'engineering_notes',description:'Structured engineering notes for progress photos/videos',input_schema:{type:'object',properties:{stage:{type:'string'},location:{type:'string',description:'Element/location if visible or given'},summary:{type:'string',description:'2-3 sentence factual description of the work shown'},readings:{type:'array',description:'User readings compared with typical limits',items:{type:'object',properties:{item:{type:'string'},value:{type:'string'},typical_requirement:{type:'string'},status:{type:'string',description:'OK, CHECK or NOT OK'}},required:['item','value']}},checks:{type:'array',description:'Inspection checklist points for this stage, with what is visible',items:{type:'object',properties:{check:{type:'string'},observation:{type:'string'},status:{type:'string',description:'OK, CHECK or NOT VISIBLE'}},required:['check']}},attention:{type:'array',items:{type:'string'},description:'Issues or things to verify'},next_steps:{type:'array',items:{type:'string'}}},required:['summary']}}],tool_choice:{type:'tool',name:'engineering_notes'}});
+    const r=await callAI({max_tokens:4000,system:sys,messages:[{role:'user',content}],tools:[{name:'engineering_notes',description:'Structured engineering notes for progress photos/videos',input_schema:{type:'object',properties:{stage:{type:'string'},location:{type:'string',description:'Element/location if visible or given'},transcript:{type:'string',description:'Word-for-word transcript of the voice note, if any'},summary:{type:'string',description:'2-3 sentence factual description of the work shown'},readings:{type:'array',description:'User readings compared with typical limits',items:{type:'object',properties:{item:{type:'string'},value:{type:'string'},typical_requirement:{type:'string'},status:{type:'string',description:'OK, CHECK or NOT OK'}},required:['item','value']}},checks:{type:'array',description:'Inspection checklist points for this stage, with what is visible',items:{type:'object',properties:{check:{type:'string'},observation:{type:'string'},status:{type:'string',description:'OK, CHECK or NOT VISIBLE'}},required:['check']}},attention:{type:'array',items:{type:'string'},description:'Issues or things to verify'},next_steps:{type:'array',items:{type:'string'}}},required:['summary']}}],tool_choice:{type:'tool',name:'engineering_notes'}});
     const v=(r.content||[]).find(b=>b.type==='tool_use')?.input;if(!v)throw new Error('AI could not write notes. Try again.');
     const ic=s=>/^ok/i.test(s||'')?'✅':/not ok/i.test(s||'')?'❌':'⚠️';
     const lines=[v.summary];
@@ -722,11 +768,12 @@ async function ppAI(){
     if(v.checks?.length)lines.push('','CHECKS',...v.checks.map(x=>`${ic(x.status)} ${x.check}${x.observation?` — ${x.observation}`:''}`));
     if(v.attention?.length)lines.push('','ATTENTION',...v.attention.map(x=>`• ${x}`));
     if(v.next_steps?.length)lines.push('','NEXT STEPS',...v.next_steps.map(x=>`• ${x}`));
+    if(v.transcript)lines.push('','VOICE NOTE (transcript)',`"${v.transcript.trim()}"`);
     lines.push('','(AI notes — typical limits; confirm against project specification / consultant requirements)');
     const rd=g('readings');$('#ppNote').value=(rd?`Readings: ${rd}\n\n`:'')+lines.join('\n');
     const sel=$('#ppStage');if(sel&&!g('stage')&&v.stage&&[...sel.options].some(o=>o.value===v.stage))sel.value=v.stage;
     if(!g('location')&&v.location)f.elements.location.value=v.location;
-    msg.textContent='✓ Notes written below. Check and edit them before saving.';
+    msg.textContent='✓ Notes written below from your '+(ppVoice?'voice note':'details')+'. Check them, then Save.';$('#ppAiBox').classList.remove('nudge');$('#ppNote').classList.add('flash');setTimeout(()=>$('#ppNote')?.classList.remove('flash'),1500);
   }catch(e){msg.textContent='⚠️ '+(e.message||'AI error')}
   box.classList.remove('busy');
 }
@@ -743,7 +790,7 @@ async function lbShow(){
   const f=lbList[lbIdx];if(!f)return;const box=$('#lbMedia');box.innerHTML='';
   $('#lbCap').textContent=`${f.cap||''}   ${lbIdx+1} / ${lbList.length}`;
   const m=await signed([f.path]);if(!m[f.path])return;
-  box.innerHTML=isVid(f)?`<video src="${m[f.path]}" controls playsinline autoplay></video>`:`<img src="${m[f.path]}" alt="">`;
+  box.innerHTML=isAud(f)?`<div class="lbaudio">🎤<b>Voice note</b><audio src="${m[f.path]}" controls autoplay></audio></div>`:isVid(f)?`<video src="${m[f.path]}" controls playsinline autoplay></video>`:`<img src="${m[f.path]}" alt="">`;
 }
 
 /* ---------- AI assistant (Gemini via Supabase function "ai") ---------- */
@@ -972,6 +1019,9 @@ document.addEventListener('click',async e=>{
   else if(a==='sort-save')sortSave(t);
   else if(a==='pp-new'){if(loaded&&!ppMissing)ppForm(null,t.dataset.s);else if(ppMissing)go('photos')}
   else if(a==='pp-ai')ppAI();
+  else if(a==='v-start')startRec();
+  else if(a==='v-stop'){recState?.mr?.state==='recording'&&recState.mr.stop()}
+  else if(a==='v-del'){ppVoice=null;drawVoice()}
   else if(a==='pp-stage')stageSheet(t.dataset.s);
   else if(a==='pp-edit')ppForm(id);
   else if(a==='pp-rmkept'){ppRemoved.push(...ppKept.splice(+t.dataset.i,1));drawPP()}

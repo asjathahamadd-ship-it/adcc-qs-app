@@ -366,3 +366,24 @@ body.scrolled .appbar{box-shadow:0 8px 24px -12px rgb(0 0 0/.45)}
 .login .tile{animation:rise .7s var(--spring) both!important}
 
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;animation-delay:0s!important;transition-duration:.01ms!important}.login .sky path{stroke-dashoffset:0}}
+
+/* voice */
+.voice{background:linear-gradient(135deg,light-dark(#fff8e8,#2a2213),var(--card));border:1.5px solid light-dark(#ecd9a6,#5a4920);border-radius:16px;padding:14px;display:grid;gap:10px;transition:box-shadow .3s}
+.voice.nudge{box-shadow:0 0 0 4px rgb(196 38 29/.25);border-color:var(--red)}
+.voice.busy .vctl{opacity:.6;pointer-events:none}
+.vhead{display:grid;gap:4px}.vhead i{color:var(--ink)}
+.vctl{display:flex;flex-wrap:wrap;gap:8px;align-items:center}.vctl audio{width:100%;max-width:340px;height:44px}
+.vbtn{display:inline-flex;align-items:center;gap:10px;min-height:56px;padding:0 22px 0 10px;border-radius:30px;border:0;background:var(--navy);color:#fff;font-weight:700;font-size:16px;box-shadow:0 10px 24px -12px rgb(40 59 91/.8)}
+.vbtn .mic{width:40px;height:40px;border-radius:50%;background:var(--gold);display:grid;place-items:center;font-size:20px}
+.vbtn.rec{background:var(--red)}.vbtn .dot{width:14px;height:14px;border-radius:50%;background:#fff;margin-left:10px;animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.25}}
+.vtime{font-weight:800;font-variant-numeric:tabular-nums;font-size:18px}
+.wave{display:inline-flex;gap:3px;align-items:center;height:24px}.wave i{width:4px;height:100%;border-radius:2px;background:var(--red);animation:wv .9s ease-in-out infinite}.wave i:nth-child(2){animation-delay:.1s}.wave i:nth-child(3){animation-delay:.2s}.wave i:nth-child(4){animation-delay:.3s}.wave i:nth-child(5){animation-delay:.4s}
+@keyframes wv{0%,100%{transform:scaleY(.3)}50%{transform:scaleY(1)}}
+.vfile{font-weight:500}
+.vtype summary{cursor:pointer;color:var(--gold-ink);font-weight:600;font-size:14px;min-height:32px;display:flex;align-items:center}
+.atile{display:grid;place-items:center;align-content:center;gap:2px;width:100%;height:100%;font-size:26px;background:light-dark(#fff3d6,#2a2213)}.atile small{font-size:11px;color:var(--mute)}
+.lbaudio{display:grid;gap:12px;justify-items:center;color:#fff;font-size:44px}.lbaudio b{font-size:16px}.lbaudio audio{width:min(90vw,420px)}
+.nodet{margin:4px 0 8px;color:var(--red);font-weight:600;font-size:14px}
+@keyframes flashbg{from{background:light-dark(#fff3d6,#3a2f14)}}
+#ppNote.flash{animation:flashbg 1.5s var(--ease)}
