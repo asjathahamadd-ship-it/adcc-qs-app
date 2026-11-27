@@ -609,7 +609,8 @@ function photosView(){
   return`<div class="top"><h1>Progress photos</h1><div class="btns"><button class="btn sm" data-act="ai-sort">✨ AI sort photos</button><button class="btn pri sm" data-act="pp-new" data-s="">+ Add photos</button></div></div>
   <div class="filters" style="grid-template-columns:minmax(0,1fr)"><select id="fPPProj" aria-label="Project">${opts(projects.map(p=>({v:p.id,l:p.name})),ppProj,'All projects')}</select></div>
   <p class="mute small" style="margin:0 0 12px">${total} photos · ${new Set(list.map(x=>x.stage)).size} of ${stageList().length} stages recorded</p>
-  <ol class="stages">${rows}</ol><button class="btn sm" data-act="pp-new" data-s="Other" style="margin-top:10px">+ Other stage</button>`;
+  <ol class="stages">${rows}</ol><button class="btn sm" data-act="pp-new" data-s="Other" style="margin-top:10px">+ Other stage</button>
+  ${pphotos.length?`<div class="dangerzone"><button class="link danger" data-act="pp-delall">🗑 Delete all progress photos (${pphotos.reduce((s,x)=>s+x.photos.length,0)})</button></div>`:''}`;
 }
 function stagePhotos(st){return pphotos.filter(x=>x.stage===st&&(!ppProj||x.project===ppProj))}
 function stageSheet(st){
@@ -689,6 +690,25 @@ async function savePP(e){
     msg.textContent=err.upload?`Couldn't upload ${err.upload}: ${err.message||'please try again'}`:errMsg(err);
   }
 }
+function ppDelAll(){
+  const n=pphotos.length,files=pphotos.reduce((s,x)=>s+x.photos.length,0);
+  openSheet(`<div class="ph"><h2>Delete all progress photos</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+  <p>This deletes <b>all ${files} photos/videos</b> in <b>${n} entries</b> across <b>all projects</b>, with their notes. <b>This can't be undone.</b></p>
+  <p class="small mute">DPRs and their photos are not affected.</p>
+  <label class="full" style="display:grid;gap:6px;font-weight:600">Type DELETE to confirm<input id="delAllIn" autocapitalize="characters" autocomplete="off"></label>
+  <p id="formMsg" class="small late" role="alert"></p>
+  <div class="btns" style="margin-top:12px"><button class="btn danger" id="delAllBtn" data-act="pp-delall-yes" disabled>Delete everything</button><button class="btn" data-act="close">Cancel</button></div>`);
+  $('#delAllIn').oninput=e=>{$('#delAllBtn').disabled=e.target.value.trim().toUpperCase()!=='DELETE'};
+}
+async function ppDelAllYes(btn){
+  if($('#delAllIn').value.trim().toUpperCase()!=='DELETE')return;
+  busy=true;btn.disabled=true;const list=[...pphotos],paths=list.flatMap(x=>x.photos.map(f=>f.path)),ids=list.map(x=>x.id);
+  try{
+    for(let i=0;i<ids.length;i+=100){btn.textContent=`Deleting… ${Math.min(i+100,ids.length)}/${ids.length}`;const {error}=await sb.from('progress_photos').delete().in('id',ids.slice(i,i+100));if(error)throw error}
+    for(let i=0;i<paths.length;i+=100)await removeFiles(paths.slice(i,i+100));
+    busy=false;closeSheet();toast('All progress photos deleted');refresh(true);
+  }catch(e){busy=false;btn.disabled=false;btn.textContent='Delete everything';$('#formMsg').textContent=errMsg(e)}
+}
 /* ---------- Voice recording ---------- */
 async function toWav(blob){
   const AC=window.AudioContext||window.webkitAudioContext,ac=new AC();
@@ -750,7 +770,7 @@ async function ppAI(){
         else{content.push({type:'text',text:`Frames from video ${file.name}:`});for(const fr of await videoFrames(file))content.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:fr}})}
       }else content.push({type:'text',text:`Photo: ${file.name}`},{type:'image',source:{type:'base64',media_type:'image/jpeg',data:await smallB64(file,1400)}});
     }
-    content.push({type:'text',text:`Stage selected: ${stage||'(not chosen — suggest one)'}\nLocation / element: ${g('location')||'-'}\nDate: ${g('date')}\nProject: ${projName(g('project'))||'-'}\nUser typed details: ${g('readings')||'(none)'}\nVoice note attached: ${ppVoice?'yes':'no'}\nExisting notes: ${g('note')||'(none)'}\n\nWrite site engineering notes for these progress photos/videos.`});
+    content.push({type:'text',text:`Stage selected: ${stage||'(not chosen — suggest one)'}\nLocation / element: ${g('location')||'-'}\nDate: ${g('date')}\nProject selected: ${projName(g('project'))||'-'}\nProjects in the app: ${JSON.stringify(projects.map(p=>({id:p.id,name:p.name,code:p.code,client:p.client})))}\nToday: ${today()}\nUser typed details: ${g('readings')||'(none)'}\nVoice note attached: ${ppVoice?'yes':'no'}\nExisting notes: ${g('note')||'(none)'}\n\nWrite site engineering notes for these progress photos/videos.`});
     const sys=`You are a senior site engineer / QA-QC inspector on a building project in Dubai, UAE, writing progress-photo notes for the contractor's records (Al Adeeb Building Contracting LLC). Be technical, practical and honest.
 - Describe only what is actually visible; do not invent things you cannot see.
 - Use the user's readings exactly as given (temperatures, slump, grade, quantities, test results) and compare them with TYPICAL requirements, e.g. for UAE hot-weather concreting (concrete temperature at placement commonly limited to about 32 °C unless the project spec says otherwise), slump vs the approved mix design, cube sampling and 7/28-day strength vs the specified grade; for reinforcement: bar sizes, spacing, top/bottom bar placement, laps and staggering, cover and spacer blocks, chairs, tying, couplers; for formwork, waterproofing, blockwork, etc. use the relevant checks.
@@ -758,8 +778,9 @@ async function ppAI(){
 - Flag anything that looks wrong or needs attention.
 - If there is a voice note, the transcript and the details from it are the most important input. Put the details in the right place (location, readings, checks).
 - If the engineer gave NO details (no voice note, no typed details), say so in attention: "No details provided by the engineer — add location, readings and tests."
-- Use the allowed stage list: ${JSON.stringify([...STAGES])}.`;
-    const r=await callAI({max_tokens:4000,system:sys,messages:[{role:'user',content}],tools:[{name:'engineering_notes',description:'Structured engineering notes for progress photos/videos',input_schema:{type:'object',properties:{stage:{type:'string'},location:{type:'string',description:'Element/location if visible or given'},transcript:{type:'string',description:'Word-for-word transcript of the voice note, if any'},summary:{type:'string',description:'2-3 sentence factual description of the work shown'},readings:{type:'array',description:'User readings compared with typical limits',items:{type:'object',properties:{item:{type:'string'},value:{type:'string'},typical_requirement:{type:'string'},status:{type:'string',description:'OK, CHECK or NOT OK'}},required:['item','value']}},checks:{type:'array',description:'Inspection checklist points for this stage, with what is visible',items:{type:'object',properties:{check:{type:'string'},observation:{type:'string'},status:{type:'string',description:'OK, CHECK or NOT VISIBLE'}},required:['check']}},attention:{type:'array',items:{type:'string'},description:'Issues or things to verify'},next_steps:{type:'array',items:{type:'string'}}},required:['summary']}}],tool_choice:{type:'tool',name:'engineering_notes'}});
+- Use the allowed stage list: ${JSON.stringify([...STAGES])}. Choose the stage that matches what the engineer SAYS (voice/typed) first, then what is visible. Only if nothing fits, give a short new stage name.
+- From the voice note/typed details, pick out: the exact location/element as said (e.g. "Ground floor tie beams TB1–TB6, grid A–C"), the project (match to the projects list by name, plot number, area or client and return its id), and the date if mentioned (e.g. "yesterday" → ISO date).`;
+    const r=await callAI({max_tokens:4000,system:sys,messages:[{role:'user',content}],tools:[{name:'engineering_notes',description:'Structured engineering notes for progress photos/videos',input_schema:{type:'object',properties:{stage:{type:'string'},location:{type:'string',description:'Exact location/element as said by the engineer, else as visible'},project_id:{type:'string',description:'id of the matching project from the list, if the engineer mentions it'},date:{type:'string',description:'YYYY-MM-DD if a date is mentioned'},transcript:{type:'string',description:'Word-for-word transcript of the voice note, if any'},summary:{type:'string',description:'2-3 sentence factual description of the work shown'},readings:{type:'array',description:'User readings compared with typical limits',items:{type:'object',properties:{item:{type:'string'},value:{type:'string'},typical_requirement:{type:'string'},status:{type:'string',description:'OK, CHECK or NOT OK'}},required:['item','value']}},checks:{type:'array',description:'Inspection checklist points for this stage, with what is visible',items:{type:'object',properties:{check:{type:'string'},observation:{type:'string'},status:{type:'string',description:'OK, CHECK or NOT VISIBLE'}},required:['check']}},attention:{type:'array',items:{type:'string'},description:'Issues or things to verify'},next_steps:{type:'array',items:{type:'string'}}},required:['summary']}}],tool_choice:{type:'tool',name:'engineering_notes'}});
     const v=(r.content||[]).find(b=>b.type==='tool_use')?.input;if(!v)throw new Error('AI could not write notes. Try again.');
     const ic=s=>/^ok/i.test(s||'')?'✅':/not ok/i.test(s||'')?'❌':'⚠️';
     const lines=[v.summary];
@@ -770,9 +791,14 @@ async function ppAI(){
     if(v.transcript)lines.push('','VOICE NOTE (transcript)',`"${v.transcript.trim()}"`);
     lines.push('','(AI notes — typical limits; confirm against project specification / consultant requirements)');
     const rd=g('readings');$('#ppNote').value=(rd?`Readings: ${rd}\n\n`:'')+lines.join('\n');
-    const sel=$('#ppStage');if(sel&&!g('stage')&&v.stage&&[...sel.options].some(o=>o.value===v.stage))sel.value=v.stage;
-    if(!g('location')&&v.location)f.elements.location.value=v.location;
-    msg.textContent='✓ Notes written below from your '+(ppVoice?'voice note':'details')+'. Check them, then Save.';$('#ppAiBox').classList.remove('nudge');$('#ppNote').classList.add('flash');setTimeout(()=>$('#ppNote')?.classList.remove('flash'),1500);
+    const said=!!(ppVoice||g('readings')),set=[];
+    const sel=$('#ppStage');
+    if(sel&&v.stage&&(said||!g('stage'))){if([...sel.options].some(o=>o.value===v.stage)){if(sel.value!==v.stage)set.push('stage');sel.value=v.stage;$('#otherWrap').hidden=true}else if(v.stage.length<60){sel.value='Other';$('#otherWrap').hidden=false;f.elements.other.value=v.stage;set.push('stage')}}
+    if(v.location&&(said||!g('location'))){if(g('location')!==v.location)set.push('location');f.elements.location.value=v.location}
+    if(v.project_id&&projects.some(p=>p.id===v.project_id)&&(said||!g('project'))){if(g('project')!==v.project_id)set.push('project');f.elements.project.value=v.project_id}
+    if(v.date&&/^\d{4}-\d{2}-\d{2}$/.test(v.date)&&said&&v.date!==g('date')){f.elements.date.value=v.date;set.push('date')}
+    ['project','date','stage','location'].forEach(k=>{const el=k==='stage'?sel:f.elements[k];if(set.includes(k)&&el){el.classList.add('flash');setTimeout(()=>el.classList.remove('flash'),1600)}});
+    msg.textContent='✓ Notes written from your '+(ppVoice?'voice note':'details')+(set.length?` · AI also set the ${set.join(', ')}`:'')+'. Check, then Save.';$('#ppAiBox').classList.remove('nudge');$('#ppNote').classList.add('flash');setTimeout(()=>$('#ppNote')?.classList.remove('flash'),1500);
   }catch(e){msg.textContent='⚠️ '+(e.message||'AI error')}
   box.classList.remove('busy');
 }
@@ -1018,6 +1044,8 @@ document.addEventListener('click',async e=>{
   else if(a==='sort-save')sortSave(t);
   else if(a==='pp-new'){if(loaded&&!ppMissing)ppForm(null,t.dataset.s);else if(ppMissing)go('photos')}
   else if(a==='pp-ai')ppAI();
+  else if(a==='pp-delall')ppDelAll();
+  else if(a==='pp-delall-yes')ppDelAllYes(t);
   else if(a==='v-start')startRec();
   else if(a==='v-stop'){recState?.mr?.state==='recording'&&recState.mr.stop()}
   else if(a==='v-del'){ppVoice=null;drawVoice()}
