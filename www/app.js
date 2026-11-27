@@ -572,7 +572,7 @@ const AI_TOOLS=[
 ];
 async function callAI(body){
   let {data,error}=await sb.functions.invoke(AI_FN,{body:{model:AI_MODEL,...body}});
-  if(error&&error.context?.status===404){const alt=AI_FN==='ai'?'smart-task':'ai';({data,error}=await sb.functions.invoke(alt,{body:{model:AI_MODEL,...body}}));if(!error)AI_FN=alt}
+  if(error&&(error.context?.status===404||error.name==='FunctionsFetchError'||/Failed to send/i.test(error.message||''))){const alt=AI_FN==='ai'?'smart-task':'ai';({data,error}=await sb.functions.invoke(alt,{body:{model:AI_MODEL,...body}}));if(!error)AI_FN=alt}
   if(error){let m=error.message||'AI is not available.';try{const j=await error.context?.json?.();if(j?.error?.message)m=j.error.message}catch{}throw new Error(m)}
   if(data?.error)throw new Error(data.error.message||'AI error');
   return data;
