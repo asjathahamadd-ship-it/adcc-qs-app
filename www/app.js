@@ -565,17 +565,19 @@ async function aiFillDpr(files){
 }
 
 /* ---------- Progress photos ---------- */
-const STAGES=['Site clearance & setting out','Excavation','Anti-termite treatment','Polythene sheet','PCC / blinding','Waterproofing (foundation)','Reinforcement','Shuttering / formwork','Concreting (RCC)','De-shuttering & curing','Backfilling & compaction','Blockwork','MEP first fix','Plastering','Screed & waterproofing (roof / wet areas)','Tiling & flooring','False ceiling','Painting','Doors, windows & joinery','MEP second fix & fixtures','Final finish / handover'];
+const STAGES=['Site clearance & setting out','Excavation','Anti-termite treatment','Polythene sheet','PCC / blinding','Waterproofing (foundation)','Reinforcement','Shuttering / formwork','Concreting (RCC)','Concrete testing (slump, temperature, cubes)','De-shuttering & curing','Backfilling & compaction','Blockwork','MEP first fix','Plastering','Screed & waterproofing (roof / wet areas)','Tiling & flooring','False ceiling','Painting','Doors, windows & joinery','MEP second fix & fixtures','Final finish / handover'];
 async function signed(paths){
   const now=Date.now(),need=[...new Set(paths)].filter(p=>p&&!(urlCache[p]&&urlCache[p].exp>now));
   for(let i=0;i<need.length;i+=100){const {data}=await sb.storage.from(BUCKET).createSignedUrls(need.slice(i,i+100),3600);(data||[]).forEach(d=>{if(d.signedUrl)urlCache[d.path]={url:d.signedUrl,exp:now+50*60e3}})}
   const m={};paths.forEach(p=>{if(urlCache[p])m[p]=urlCache[p].url});return m;
 }
 async function fillThumbs(root){
-  const els=[...(root||document).querySelectorAll('img[data-path]:not([src])')];if(!els.length)return;
+  const els=[...(root||document).querySelectorAll('img[data-path]:not([src]),video[data-path]:not([src])')];if(!els.length)return;
   const m=await signed(els.map(e=>e.dataset.path));els.forEach(e=>{const u=m[e.dataset.path];if(u)e.src=u});
 }
-const thumb=(f,list,i)=>`<button type="button" class="pthumb" data-act="lb" data-list="${esc(list)}" data-i="${i}"><img data-path="${esc(f.path)}" alt="${esc(f.name)}" loading="lazy"></button>`;
+const isVid=f=>/^video\//.test(f.type||'')||/\.(mp4|mov|webm|3gp|m4v)$/i.test(f.name||f.path||'');
+const media=(f,src)=>isVid(f)?`<video ${src?`src="${src}"`:`data-path="${esc(f.path)}"`} muted playsinline preload="metadata"></video><span class="vbadge">▶</span>`:`<img ${src?`src="${src}"`:`data-path="${esc(f.path)}"`} alt="${esc(f.name||'')}" loading="lazy">`;
+const thumb=(f,list,i)=>`<button type="button" class="pthumb rel" data-act="lb" data-list="${esc(list)}" data-i="${i}">${media(f)}</button>`;
 function stageList(){const extra=[...new Set(pphotos.map(x=>x.stage))].filter(s=>!STAGES.includes(s));return[...STAGES,...extra]}
 function photosView(){
   if(ppMissing)return`<div class="top"><h1>Progress photos</h1></div><div class="empty"><h2>One-time setup needed</h2><p>The progress photos table hasn't been created in Supabase yet. Run the setup script in the Supabase SQL Editor, then tap Refresh.</p><button class="btn pri" data-act="refresh">↻ Refresh</button></div>`;
@@ -598,7 +600,7 @@ function stagePhotos(st){return pphotos.filter(x=>x.stage===st&&(!ppProj||x.proj
 function stageSheet(st){
   const es=stagePhotos(st);
   openSheet(`<div class="ph"><div><div class="cat">Progress photos${ppProj?' · '+esc(projName(ppProj)):''}</div><h2>${esc(st)}</h2></div><button class="x" data-act="close" aria-label="Close">×</button></div>
-  <button class="btn pri" data-act="pp-new" data-s="${esc(st)}" style="margin-bottom:14px">+ Add photos to this stage</button>
+  <button class="btn pri" data-act="pp-new" data-s="${esc(st)}" style="margin-bottom:14px">+ Add photos / videos to this stage</button>
   ${es.length?es.map(x=>`<section class="ppentry"><div class="shead"><div><b>${esc(fmtDate(x.date))}</b>${x.location?` · ${esc(x.location)}`:''}${!ppProj&&projName(x.project)?`<div class="mute small">${esc(projName(x.project))}</div>`:''}</div><button class="link" data-act="pp-edit" data-id="${esc(x.id)}">Edit</button></div>
    ${x.note?`<p style="margin:4px 0 8px;white-space:pre-wrap">${esc(x.note)}</p>`:''}<div class="pgrid">${x.photos.map((f,j)=>thumb(f,'entry:'+x.id,j)).join('')}</div></section>`).join(''):'<p class="mute">No photos for this stage yet.</p>'}`);
   fillThumbs($('#panel'));
@@ -613,30 +615,33 @@ async function compress(file){
 function ppForm(id,stage){
   const x=id?pphotos.find(e=>e.id===id):null;editingPP=id||null;ppNew=[];ppKept=[...(x?.photos||[])];ppRemoved=[];
   const st=x?.stage||stage||'',isOther=st&&!stageList().includes(st)||st==='Other';
-  openSheet(`<div class="ph"><h2>${x?'Edit photos':'Add progress photos'}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
+  openSheet(`<div class="ph"><h2>${x?'Edit photos / videos':'Add progress photos & videos'}</h2><button class="x" data-act="close" aria-label="Close">×</button></div>
   <form class="form" id="ppForm" novalidate>
    <label>Project<select name="project">${opts(projects.map(p=>({v:p.id,l:p.name})),x?.project||ppProj||(projects.length===1?projects[0].id:''),'No project')}</select></label>
    <label>Date<input name="date" type="date" value="${esc(x?.date||today())}"></label>
    <label class="full">Stage<select name="stage" id="ppStage">${opts([...stageList(),'Other'],isOther?'Other':st,'Choose stage')}</select></label>
    <label class="full" id="otherWrap" ${isOther?'':'hidden'}>Stage name<input name="other" value="${esc(isOther&&st!=='Other'?st:'')}" placeholder="e.g. Swimming pool tiling"></label>
    <label class="full">Location / element<input name="location" value="${esc(x?.location||'')}" placeholder="e.g. Footing F1–F6, Grid A–C, Ground floor slab"></label>
-   <label class="full">Note<textarea name="note" style="min-height:60px" placeholder="Optional, e.g. Inspected by consultant, WIR-045">${esc(x?.note||'')}</textarea></label>
-   <div class="full"><b class="small">Photos</b><div class="pgrid" id="ppGrid" style="margin:8px 0"></div>
-    <div class="btns"><label class="btn sm">📷 Take photo<input id="ppCam" type="file" accept="image/*" capture="environment" hidden></label><label class="btn sm">Choose from gallery<input id="ppIn" type="file" accept="image/*" multiple hidden></label></div></div>
+   <div class="full"><b class="small">Photos & videos</b><div class="pgrid" id="ppGrid" style="margin:8px 0"></div>
+    <div class="btns"><label class="btn sm">📷 Photo<input id="ppCam" type="file" accept="image/*" capture="environment" hidden></label><label class="btn sm">🎥 Video<input id="ppVid" type="file" accept="video/*" capture="environment" hidden></label><label class="btn sm">Choose from gallery<input id="ppIn" type="file" accept="image/*,video/*" multiple hidden></label></div>
+    <p class="small mute" style="margin:6px 0 0">Videos up to 20 MB (about 20–40 seconds). Keep test videos short.</p></div>
+   <label class="full">Your readings / details (optional)<textarea name="readings" style="min-height:56px" placeholder="e.g. Grade C40, slump 110 mm, concrete temp 31°C, ambient 34°C, 6 cubes taken, pour 45 m³, inspected by consultant WIR-045"></textarea></label>
+   <div class="full aifill" id="ppAiBox"><div><b>✨ Engineering notes with AI</b><div class="small mute" id="ppAiMsg">AI looks at the photos/videos and your readings, then writes the technical notes: what is shown, the checks for this stage, your values against typical limits, and what to verify.</div></div><button type="button" class="btn sm pri" data-act="pp-ai">Write notes</button></div>
+   <label class="full">Notes<textarea name="note" id="ppNote" style="min-height:120px" placeholder="Write your own notes, or tap ✨ Write notes">${esc(x?.note||'')}</textarea></label>
    <p id="formMsg" class="full small late" role="alert"></p>
    <div class="full btns"><button class="btn pri" type="submit" id="saveBtn">${x?'Save changes':'Save photos'}</button><button class="btn" type="button" data-act="close">Cancel</button>${x?`<button class="btn danger" type="button" data-act="pp-del" data-id="${esc(x.id)}">Delete</button>`:''}</div>
    <div id="delBox" class="full"></div>
   </form>`);
   drawPP();
-  const add=e=>{for(const f of e.target.files){if(f.size>25*1048576){toast(f.name+' is too large');continue}ppNew.push(f)}e.target.value='';drawPP()};
-  $('#ppIn').onchange=add;$('#ppCam').onchange=add;
+  const add=e=>{for(const f of e.target.files){const lim=isVid(f)?20:25;if(f.size>lim*1048576){toast(`${f.name} is too large (max ${lim} MB). Record a shorter video.`);continue}ppNew.push(f)}e.target.value='';drawPP()};
+  $('#ppIn').onchange=add;$('#ppCam').onchange=add;$('#ppVid').onchange=add;
   $('#ppStage').onchange=e=>{$('#otherWrap').hidden=e.target.value!=='Other'};
   $('#ppForm').onsubmit=savePP;
 }
 function drawPP(){
   const g=$('#ppGrid');if(!g)return;
-  g.innerHTML=ppKept.map((f,i)=>`<div class="pthumb rel"><img data-path="${esc(f.path)}" alt=""><button type="button" class="rm" data-act="pp-rmkept" data-i="${i}" aria-label="Remove">×</button></div>`).join('')+
-   ppNew.map((f,i)=>`<div class="pthumb rel"><img src="${URL.createObjectURL(f)}" alt=""><button type="button" class="rm" data-act="pp-rmnew" data-i="${i}" aria-label="Remove">×</button></div>`).join('')||'<p class="mute small" style="grid-column:1/-1;margin:0">No photos yet.</p>';
+  g.innerHTML=ppKept.map((f,i)=>`<div class="pthumb rel">${media(f)}<button type="button" class="rm" data-act="pp-rmkept" data-i="${i}" aria-label="Remove">×</button></div>`).join('')+
+   ppNew.map((f,i)=>`<div class="pthumb rel">${media(f,URL.createObjectURL(f))}<button type="button" class="rm" data-act="pp-rmnew" data-i="${i}" aria-label="Remove">×</button></div>`).join('')||'<p class="mute small" style="grid-column:1/-1;margin:0">No photos or videos yet.</p>';
   fillThumbs(g);
 }
 async function savePP(e){
@@ -644,13 +649,13 @@ async function savePP(e){
   const fd=new FormData(e.target),g=k=>(fd.get(k)||'').toString().trim(),msg=$('#formMsg');
   let stage=g('stage');if(stage==='Other')stage=g('other')||'Other';
   if(!stage){msg.textContent='Please choose a stage.';return}
-  if(!ppNew.length&&!ppKept.length){msg.textContent='Add at least one photo.';return}
+  if(!ppNew.length&&!ppKept.length){msg.textContent='Add at least one photo or video.';return}
   const btn=$('#saveBtn');busy=true;btn.disabled=true;msg.textContent='';
   const photos=[...ppKept],uploaded=[];
   try{
     for(let i=0;i<ppNew.length;i++){btn.textContent=`Uploading ${i+1} of ${ppNew.length}…`;
       const f=await compress(ppNew[i]);
-      try{const path=await upload(f);uploaded.push(path);photos.push({path,name:f.name,size:f.size})}catch(err){err.upload=ppNew[i].name;throw err}}
+      try{const path=await upload(f);uploaded.push(path);photos.push({path,name:f.name,size:f.size,type:f.type||''})}catch(err){err.upload=ppNew[i].name;throw err}}
     btn.textContent='Saving…';
     const row={project_id:g('project')||null,stage,location:g('location'),taken_on:g('date')||today(),note:g('note'),photos,updated_at:new Date().toISOString()};
     const {error}=editingPP?await sb.from('progress_photos').update(row).eq('id',editingPP):await sb.from('progress_photos').insert(row);
@@ -663,19 +668,68 @@ async function savePP(e){
     msg.textContent=err.upload?`Couldn't upload ${err.upload}: ${err.message||'please try again'}`:errMsg(err);
   }
 }
+/* AI engineering notes for progress photos / videos */
+async function videoFrames(file,n=4){
+  const url=URL.createObjectURL(file),v=document.createElement('video');v.muted=true;v.playsInline=true;v.preload='auto';v.src=url;
+  await new Promise((res,rej)=>{v.onloadeddata=res;v.onerror=()=>rej(new Error('Could not read video'));setTimeout(res,8000)});
+  const d=v.duration&&isFinite(v.duration)?v.duration:1,out=[];
+  for(let k=0;k<n;k++){const t=Math.min(d-0.1,d*(k+0.5)/n);await new Promise(res=>{v.onseeked=res;v.currentTime=Math.max(0,t);setTimeout(res,3000)});
+    const sc=Math.min(1,1280/Math.max(v.videoWidth||1280,v.videoHeight||720)),c=document.createElement('canvas');c.width=Math.round((v.videoWidth||1280)*sc);c.height=Math.round((v.videoHeight||720)*sc);c.getContext('2d').drawImage(v,0,0,c.width,c.height);out.push(c.toDataURL('image/jpeg',0.75).split(',')[1])}
+  URL.revokeObjectURL(url);return out;
+}
+async function ppAI(){
+  const f=$('#ppForm'),box=$('#ppAiBox'),msg=$('#ppAiMsg');if(!f||box.classList.contains('busy'))return;
+  const g=k=>(f.elements[k]?.value||'').trim();let stage=g('stage');if(stage==='Other')stage=g('other');
+  const items=[...ppNew.map(x=>({file:x})),...ppKept.map(x=>({kept:x}))].slice(0,6);
+  if(!items.length&&!g('readings')){msg.textContent='Add a photo, a video or your readings first.';return}
+  box.classList.add('busy');msg.textContent='AI is studying your photos/videos… (10–40 seconds)';
+  try{
+    const content=[];
+    for(const it of items){
+      let file=it.file;
+      if(!file&&it.kept){if(isVid(it.kept)){content.push({type:'text',text:`[Saved video: ${it.kept.name}]`});continue}const u=(await signed([it.kept.path]))[it.kept.path];if(!u)continue;const b=await (await fetch(u)).blob();file=new File([b],it.kept.name,{type:b.type||'image/jpeg'})}
+      if(isVid(file)){
+        if(file.size<=8*1048576)content.push({type:'text',text:`Video: ${file.name}`},{type:'image',source:{type:'base64',media_type:file.type||'video/mp4',data:await toB64(file)}});
+        else{content.push({type:'text',text:`Frames from video ${file.name}:`});for(const fr of await videoFrames(file))content.push({type:'image',source:{type:'base64',media_type:'image/jpeg',data:fr}})}
+      }else content.push({type:'text',text:`Photo: ${file.name}`},{type:'image',source:{type:'base64',media_type:'image/jpeg',data:await smallB64(file,1400)}});
+    }
+    content.push({type:'text',text:`Stage selected: ${stage||'(not chosen — suggest one)'}\nLocation / element: ${g('location')||'-'}\nDate: ${g('date')}\nProject: ${projName(g('project'))||'-'}\nUser readings / details: ${g('readings')||'(none)'}\nExisting notes: ${g('note')||'(none)'}\n\nWrite site engineering notes for these progress photos/videos.`});
+    const sys=`You are a senior site engineer / QA-QC inspector on a building project in Dubai, UAE, writing progress-photo notes for the contractor's records (Al Adeeb Building Contracting LLC). Be technical, practical and honest.
+- Describe only what is actually visible; do not invent things you cannot see.
+- Use the user's readings exactly as given (temperatures, slump, grade, quantities, test results) and compare them with TYPICAL requirements, e.g. for UAE hot-weather concreting (concrete temperature at placement commonly limited to about 32 °C unless the project spec says otherwise), slump vs the approved mix design, cube sampling and 7/28-day strength vs the specified grade; for reinforcement: bar sizes, spacing, top/bottom bar placement, laps and staggering, cover and spacer blocks, chairs, tying, couplers; for formwork, waterproofing, blockwork, etc. use the relevant checks.
+- Always say limits are typical and must be confirmed against the project specification / approved method statement / consultant's requirements.
+- Flag anything that looks wrong or needs attention.
+- Use the allowed stage list: ${JSON.stringify([...STAGES])}.`;
+    const r=await callAI({max_tokens:4000,system:sys,messages:[{role:'user',content}],tools:[{name:'engineering_notes',description:'Structured engineering notes for progress photos/videos',input_schema:{type:'object',properties:{stage:{type:'string'},location:{type:'string',description:'Element/location if visible or given'},summary:{type:'string',description:'2-3 sentence factual description of the work shown'},readings:{type:'array',description:'User readings compared with typical limits',items:{type:'object',properties:{item:{type:'string'},value:{type:'string'},typical_requirement:{type:'string'},status:{type:'string',description:'OK, CHECK or NOT OK'}},required:['item','value']}},checks:{type:'array',description:'Inspection checklist points for this stage, with what is visible',items:{type:'object',properties:{check:{type:'string'},observation:{type:'string'},status:{type:'string',description:'OK, CHECK or NOT VISIBLE'}},required:['check']}},attention:{type:'array',items:{type:'string'},description:'Issues or things to verify'},next_steps:{type:'array',items:{type:'string'}}},required:['summary']}}],tool_choice:{type:'tool',name:'engineering_notes'}});
+    const v=(r.content||[]).find(b=>b.type==='tool_use')?.input;if(!v)throw new Error('AI could not write notes. Try again.');
+    const ic=s=>/^ok/i.test(s||'')?'✅':/not ok/i.test(s||'')?'❌':'⚠️';
+    const lines=[v.summary];
+    if(v.readings?.length)lines.push('','READINGS',...v.readings.map(x=>`${ic(x.status)} ${x.item}: ${x.value}${x.typical_requirement?` (typical: ${x.typical_requirement})`:''}`));
+    if(v.checks?.length)lines.push('','CHECKS',...v.checks.map(x=>`${ic(x.status)} ${x.check}${x.observation?` — ${x.observation}`:''}`));
+    if(v.attention?.length)lines.push('','ATTENTION',...v.attention.map(x=>`• ${x}`));
+    if(v.next_steps?.length)lines.push('','NEXT STEPS',...v.next_steps.map(x=>`• ${x}`));
+    lines.push('','(AI notes — typical limits; confirm against project specification / consultant requirements)');
+    const rd=g('readings');$('#ppNote').value=(rd?`Readings: ${rd}\n\n`:'')+lines.join('\n');
+    const sel=$('#ppStage');if(sel&&!g('stage')&&v.stage&&[...sel.options].some(o=>o.value===v.stage))sel.value=v.stage;
+    if(!g('location')&&v.location)f.elements.location.value=v.location;
+    msg.textContent='✓ Notes written below. Check and edit them before saving.';
+  }catch(e){msg.textContent='⚠️ '+(e.message||'AI error')}
+  box.classList.remove('busy');
+}
 /* lightbox */
 function lbOpen(list,i){
   if(list.startsWith('stage:'))lbList=stagePhotos(list.slice(6)).flatMap(x=>x.photos.map(f=>({...f,cap:`${fmtDate(x.date)}${x.location?' · '+x.location:''}`})));
   else if(list.startsWith('entry:')){const x=pphotos.find(e=>e.id===list.slice(6));lbList=(x?.photos||[]).map(f=>({...f,cap:`${fmtDate(x.date)}${x.location?' · '+x.location:''}`}))}
   else if(list.startsWith('dpr:')){const r=dprs.find(e=>e.id===list.slice(4));lbList=(r?.photos||[]).map(f=>({...f,cap:fmtDate(r.date)}))}
   lbIdx=+i||0;let lb=$('#lb');
-  if(!lb){document.body.insertAdjacentHTML('beforeend','<div class="lb" id="lb"><button class="x lbx" data-act="lb-close" aria-label="Close">×</button><button class="lbn prev" data-act="lb-prev" aria-label="Previous">‹</button><img id="lbImg" alt=""><button class="lbn next" data-act="lb-next" aria-label="Next">›</button><div class="lbcap" id="lbCap"></div></div>');lb=$('#lb')}
+  if(!lb){document.body.insertAdjacentHTML('beforeend','<div class="lb" id="lb"><button class="x lbx" data-act="lb-close" aria-label="Close">×</button><button class="lbn prev" data-act="lb-prev" aria-label="Previous">‹</button><div id="lbMedia" class="lbm"></div><button class="lbn next" data-act="lb-next" aria-label="Next">›</button><div class="lbcap" id="lbCap"></div></div>');lb=$('#lb')}
   lb.hidden=false;lbShow();
 }
 async function lbShow(){
-  const f=lbList[lbIdx];if(!f)return;const img=$('#lbImg');img.removeAttribute('src');
+  const f=lbList[lbIdx];if(!f)return;const box=$('#lbMedia');box.innerHTML='';
   $('#lbCap').textContent=`${f.cap||''}   ${lbIdx+1} / ${lbList.length}`;
-  const m=await signed([f.path]);if(m[f.path])img.src=m[f.path];
+  const m=await signed([f.path]);if(!m[f.path])return;
+  box.innerHTML=isVid(f)?`<video src="${m[f.path]}" controls playsinline autoplay></video>`:`<img src="${m[f.path]}" alt="">`;
 }
 
 /* ---------- AI assistant (Gemini via Supabase function "ai") ---------- */
@@ -903,6 +957,7 @@ document.addEventListener('click',async e=>{
   else if(a==='sort-rm'){sortItems.splice(+t.dataset.i,1);drawSort()}
   else if(a==='sort-save')sortSave(t);
   else if(a==='pp-new'){if(loaded&&!ppMissing)ppForm(null,t.dataset.s);else if(ppMissing)go('photos')}
+  else if(a==='pp-ai')ppAI();
   else if(a==='pp-stage')stageSheet(t.dataset.s);
   else if(a==='pp-edit')ppForm(id);
   else if(a==='pp-rmkept'){ppRemoved.push(...ppKept.splice(+t.dataset.i,1));drawPP()}
@@ -910,7 +965,7 @@ document.addEventListener('click',async e=>{
   else if(a==='pp-del'){$('#delBox').innerHTML=`<div class="card" style="margin-top:12px"><p style="margin:0 0 10px">Delete these photos? This can't be undone.</p><div class="btns"><button type="button" class="btn danger" data-act="pp-delyes" data-id="${esc(id)}">Yes, delete</button><button type="button" class="btn" data-act="delno">Keep them</button></div></div>`}
   else if(a==='pp-delyes'){const x=pphotos.find(e=>e.id===id);const {error}=await sb.from('progress_photos').delete().eq('id',id);if(error)return toast(errMsg(error));await removeFiles((x?.photos||[]).map(f=>f.path));closeSheet();toast('Deleted');refresh(true)}
   else if(a==='lb')lbOpen(t.dataset.list,t.dataset.i);
-  else if(a==='lb-close')$('#lb').hidden=true;
+  else if(a==='lb-close'){$('#lb').hidden=true;$('#lbMedia').innerHTML=''}
   else if(a==='lb-prev'){lbIdx=(lbIdx-1+lbList.length)%lbList.length;lbShow()}
   else if(a==='lb-next'){lbIdx=(lbIdx+1)%lbList.length;lbShow()}
   else if(a==='dpr-new'){if(loaded&&!dprMissing)dprForm(null);else if(dprMissing)go('dpr')}
