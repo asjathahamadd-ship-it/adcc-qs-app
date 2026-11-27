@@ -457,7 +457,7 @@ function menTotal(){
 function drawPhotos(){
   const l=$('#photoList');if(!l)return;
   l.innerHTML=dprPhotosKept.map((f,i)=>`<li><span>${esc(f.name)}</span><button type="button" class="link" data-act="dpr-rmkept" data-i="${i}">Remove</button></li>`).join('')+
-   dprPhotosNew.map((f,i)=>`<li><span>${esc(f.name)} <span class="mute">(new)</span></span><button type="button" class="link" data-act="dpr-rmnew" data-i="${i}">Remove</button></li>`).join('');
+   dprPhotosNew.map((f,i)=>`<li><span class="fimg"><img src="${URL.createObjectURL(f)}" alt="">${esc(f.name)} <span class="mute">(new)</span></span><button type="button" class="link" data-act="dpr-rmnew" data-i="${i}">Remove</button></li>`).join('');
 }
 async function saveDpr(e){
   e.preventDefault();if(busy)return;
@@ -510,6 +510,39 @@ function preFromAI(v){
     materials:(v.materials||[]).map(m=>({material:m.material||'',qty:m.qty??'',unit:m.unit||''})),tasks:(v.tasks||[]).map(x=>({description:x.description||'',qty:x.qty??''})),
     remarks:v.remarks||'',submitted_by:v.submitted_by||base.submitted_by,reviewed_by:v.reviewed_by||base.reviewed_by};
 }
+/* AI: pull site photos out of an uploaded DPR (PDF or photo) */
+const PDFJS='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+function loadPdfJs(){
+  if(window.pdfjsLib)return Promise.resolve();
+  return new Promise((res,rej)=>{const sc=document.createElement('script');sc.src=PDFJS+'pdf.min.js';sc.onload=()=>{pdfjsLib.GlobalWorkerOptions.workerSrc=PDFJS+'pdf.worker.min.js';res()};sc.onerror=()=>rej(new Error('Could not load PDF reader'));document.head.appendChild(sc)});
+}
+async function fileCanvases(f){
+  const out=[];
+  if(f.type==='application/pdf'||/\.pdf$/i.test(f.name)){
+    await loadPdfJs();const pdf=await pdfjsLib.getDocument({data:new Uint8Array(await f.arrayBuffer())}).promise;
+    for(let i=1;i<=Math.min(pdf.numPages,4);i++){const pg=await pdf.getPage(i),v1=pg.getViewport({scale:1}),sc=Math.min(3,2600/Math.max(v1.width,v1.height)),vp=pg.getViewport({scale:sc});
+      const c=document.createElement('canvas');c.width=Math.round(vp.width);c.height=Math.round(vp.height);await pg.render({canvasContext:c.getContext('2d'),viewport:vp}).promise;out.push(c)}
+  }else{const bmp=await createImageBitmap(f),sc=Math.min(1,3000/Math.max(bmp.width,bmp.height)),c=document.createElement('canvas');c.width=Math.round(bmp.width*sc);c.height=Math.round(bmp.height*sc);c.getContext('2d').drawImage(bmp,0,0,c.width,c.height);out.push(c)}
+  return out;
+}
+const canvasB64=(c,max=1400)=>{const sc=Math.min(1,max/Math.max(c.width,c.height)),t=document.createElement('canvas');t.width=Math.round(c.width*sc);t.height=Math.round(c.height*sc);t.getContext('2d').drawImage(c,0,0,t.width,t.height);return t.toDataURL('image/jpeg',0.8).split(',')[1]};
+async function extractDprPhotos(files){
+  const photos=[];let n=0;
+  for(const f of files){
+    let pages;try{pages=await fileCanvases(f)}catch{continue}
+    for(const c of pages){
+      const r=await callAI({max_tokens:2000,system:'You locate photographs inside scanned documents.',messages:[{role:'user',content:[{type:'image',source:{type:'base64',media_type:'image/jpeg',data:canvasB64(c)}},{type:'text',text:'This is a page of a construction daily progress report. Find every SITE PHOTOGRAPH on it (real camera photos of the construction site). Do NOT include logos, tables, signatures, stamps or text. Return one bounding box per photo as box_2d [ymin, xmin, ymax, xmax] normalized 0-1000. Return an empty list if there are none.'}]}],tools:[{name:'photo_boxes',description:'Bounding boxes of site photographs',input_schema:{type:'object',properties:{boxes:{type:'array',items:{type:'object',properties:{box_2d:{type:'array',items:{type:'number'}}},required:['box_2d']}}},required:['boxes']}}],tool_choice:{type:'tool',name:'photo_boxes'}});
+      const boxes=((r.content||[]).find(b=>b.type==='tool_use')?.input?.boxes||[]).map(b=>b.box_2d).filter(b=>Array.isArray(b)&&b.length===4);
+      for(const [y0,x0,y1,x1] of boxes){
+        const X=Math.max(0,Math.min(x0,x1))/1000*c.width,Y=Math.max(0,Math.min(y0,y1))/1000*c.height,W=Math.abs(x1-x0)/1000*c.width,H=Math.abs(y1-y0)/1000*c.height;
+        const area=(W*H)/(c.width*c.height);if(area<0.006||area>0.5||W<60||H<60)continue;
+        const t=document.createElement('canvas');t.width=Math.round(W);t.height=Math.round(H);t.getContext('2d').drawImage(c,X,Y,W,H,0,0,t.width,t.height);
+        const blob=await new Promise(res=>t.toBlob(res,'image/jpeg',0.88));if(blob)photos.push(new File([blob],`dpr-site-photo-${++n}.jpg`,{type:'image/jpeg'}));
+      }
+    }
+  }
+  return photos;
+}
 async function aiFillDpr(files){
   const box=document.querySelector('.aifill');box.classList.add('busy');box.querySelector('.small').textContent='AI is reading your file… (10–40 seconds)';
   try{
@@ -519,7 +552,10 @@ async function aiFillDpr(files){
     const keepNew=dprPhotosNew,keepKept=dprPhotosKept,keepRem=dprPhotosRemoved,eid=editingDpr;
     const pre=preFromAI(v);pre._keepPhotos=true;dprPhotosNew=keepNew;dprPhotosKept=keepKept;dprPhotosRemoved=keepRem;
     if(eid){dprForm(null,pre);editingDpr=eid;$('#saveBtn').textContent='Save changes'}else dprForm(null,pre);
-    const t=totals(pre);toast(`AI filled the DPR: ${t.all} total manpower. Please check before saving.`);
+    const t=totals(pre);toast(`AI filled the DPR: ${t.all} total manpower. Now taking out the site photos…`);
+    const box2=document.querySelector('.aifill .small');if(box2)box2.textContent='✓ Filled. Now taking out the site photos from your file…';
+    try{const ph=await extractDprPhotos(files);if($('#dprForm')){dprPhotosNew.push(...ph);drawPhotos();const b3=document.querySelector('.aifill .small');if(b3)b3.textContent=ph.length?`✓ Filled, and ${ph.length} site photos added below. Please check before saving.`:'✓ Filled. No site photos found in the file. Add photos below if needed.';toast(ph.length?`${ph.length} site photos added`:'No site photos found in the file')}}
+    catch(e){const b3=document.querySelector('.aifill .small');if(b3)b3.textContent='✓ Filled. Couldn\'t take out photos ('+(e.message||'error')+'). Add them below.'}
   }catch(e){box.classList.remove('busy');box.querySelector('.small').textContent='⚠️ '+(e.message||'AI error')}
 }
 

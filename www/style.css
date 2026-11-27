@@ -250,3 +250,5 @@ pre.mail{white-space:pre-wrap;font:14px/1.5 Inter,system-ui,sans-serif;backgroun
 .chatin{grid-template-columns:48px minmax(0,1fr) auto!important}.chatin .attach{padding:0;min-height:50px;font-size:20px}
 @media print{body.printing>*:not(#printArea){display:none!important}#printArea{display:block}#printArea .rep{border:0;font-size:11px}#printArea .rgrid{grid-template-columns:1fr 1fr}#printArea .pgrid{grid-template-columns:repeat(5,1fr)}@page{size:A4;margin:8mm}*{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 body.printing #printArea{position:absolute;left:0;top:0;width:100%;z-index:999;background:#fff}
+
+.fimg{display:flex;align-items:center;gap:10px}.fimg img{width:56px;height:42px;object-fit:cover;border-radius:6px;flex:none}
