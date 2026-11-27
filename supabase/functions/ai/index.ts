@@ -36,14 +36,28 @@ Deno.serve(async (req) => {
         ? { mode: "ANY", allowedFunctionNames: [b.tool_choice.name] } : { mode: "AUTO" } };
     }
     let last = "";
-    for (const model of MODELS) {
+    // Find the current free models automatically (Google renames models over time)
+    const models = [...MODELS];
+    try {
+      const lr = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", { headers: { "x-goog-api-key": key } });
+      if (lr.ok) {
+        // deno-lint-ignore no-explicit-any
+        const names = ((await lr.json()).models || []).filter((m: any) => (m.supportedGenerationMethods || []).includes("generateContent"))
+          // deno-lint-ignore no-explicit-any
+          .map((m: any) => String(m.name).replace("models/", ""))
+          .filter((n: string) => !/image|tts|audio|embed|live|vision-only|learnlm|gemma/i.test(n));
+        const rank = (n: string) => (/flash/i.test(n) ? 0 : /pro/i.test(n) ? 2 : 1) + (/lite/i.test(n) ? 0.5 : 0) + (/preview|exp/i.test(n) ? 0.3 : 0);
+        models.push(...names.sort((a: string, b: string) => rank(a) - rank(b)).slice(0, 6));
+      }
+    } catch { /* use defaults */ }
+    for (const model of [...new Set(models)]) {
       const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
         method: "POST", headers: { "x-goog-api-key": key, "content-type": "application/json" }, body: JSON.stringify(body),
       });
       const t = await r.text();
       if (!r.ok) {
         last = t;
-        if ([404, 429, 500, 503].includes(r.status)) continue; // try next model
+        if ([400, 404, 429, 500, 503].includes(r.status) && /not found|not supported|RESOURCE_EXHAUSTED|UNAVAILABLE|INTERNAL|overloaded/i.test(t)) continue; // try next model
         let msg = t; try { msg = JSON.parse(t).error.message; } catch { /* keep */ }
         return json({ error: { message: msg } }, r.status);
       }
